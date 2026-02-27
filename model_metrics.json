@@ -1,0 +1,56 @@
+{
+  "lgbm": {
+    "model": "LightGBM",
+    "accuracy": 89.92,
+    "recall_rejected": 81.04,
+    "precision_approved": 95.78,
+    "f1_score": 73.87,
+    "auc_roc": 90.88,
+    "confusion_matrix": {
+      "TP": 171,
+      "TN": 908,
+      "FP": 81,
+      "FN": 40
+    },
+    "total_test": 1200,
+    "total_flagged": 252,
+    "total_cleared": 948,
+    "false_negative_rate": 18.96,
+    "false_positive_rate": 8.19
+  },
+  "decision_tree": {
+    "model": "Decision Tree",
+    "accuracy": 92.33,
+    "recall_rejected": 65.88,
+    "precision_approved": 93.08,
+    "f1_score": 75.14,
+    "auc_roc": 89.1,
+    "confusion_matrix": {
+      "TP": 139,
+      "TN": 969,
+      "FP": 20,
+      "FN": 72
+    },
+    "total_test": 1200,
+    "total_flagged": 159,
+    "total_cleared": 1041,
+    "false_negative_rate": 34.12,
+    "false_positive_rate": 2.02
+  },
+  "shap_importance": {
+    "Exp_TotalAmount": 1.1917,
+    "Submission_Gap": 0.6037,
+    "IsAffidavit": 0.52,
+    "ExpCat_ID": 0.387,
+    "Is_Round_Number": 0.2551,
+    "Dept_ID": 0.1742,
+    "Is_Weekend": 0.1679
+  },
+  "business_impact": {
+    "standard_review_pct": 85.6,
+    "audit_flag_pct": 14.4,
+    "false_negative_rate": 18.96,
+    "false_positive_rate": 8.19,
+    "total_test_records": 1200
+  }
+}
