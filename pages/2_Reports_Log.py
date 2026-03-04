@@ -101,12 +101,17 @@ if not db.is_db_available():
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
-  <span style="font-size:2rem;">📁</span>
+<div style="display:flex; align-items:center; gap:14px; margin-bottom:6px;
+            animation:fadeInUp 0.45s cubic-bezier(.22,1,.36,1) both;">
+  <div style="width:48px; height:48px; border-radius:14px;
+              background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+              display:flex; align-items:center; justify-content:center;
+              font-size:1.5rem; box-shadow:0 4px 16px rgba(59,130,246,0.3);">📁</div>
   <div>
-    <h2 style="margin:0; color:#f1f5f9;">Reports Log</h2>
-    <span style="font-size:0.85rem; color:#64748b;">
-      {ROLE_ICONS[role]} Viewing as <b style="color:#f1f5f9;">{role}</b>
+    <h2 style="margin:0; color:#f1f5f9; font-size:1.55rem; font-weight:800;
+               letter-spacing:-0.02em;">Reports Log</h2>
+    <span style="font-size:0.82rem; color:#64748b;">
+      {ROLE_ICONS[role]} Viewing as <b style="color:#94a3b8;">{role}</b>
       &nbsp;·&nbsp; Click any row to open full detail
       {"&nbsp;·&nbsp; Select multiple rows to delete" if role == "Manager" else ""}
     </span>
@@ -180,7 +185,7 @@ k1.metric("⏳ Pending Review",  pend,  help="Awaiting manager decision")
 k2.metric("✅ Approved",        apprd, help="Approved — in FO reimbursement queue")
 k3.metric("❌ Rejected",        rejd,  help="Rejected by manager")
 k4.metric("💸 Reimbursed",      reimb, help="Fully processed and paid")
-k5.metric("Filtered Value",     f"₱{total_val:,.2f}")
+k5.metric("💰 Filtered Value",  f"₱{total_val:,.0f}", help="Total amount in current view")
 
 # ── CSV Export ────────────────────────────────────────────────────────────────
 if not view.empty:
@@ -274,25 +279,32 @@ def show_report_modal(rid: int):
                     align-items:flex-start; flex-wrap:wrap; gap:10px;">
             <div>
                 <div style="font-size:0.68rem; color:#64748b; text-transform:uppercase;
-                            letter-spacing:0.1em;">Report #{rid}</div>
-                <div style="font-size:1.15rem; font-weight:700; color:#f1f5f9; margin-top:4px;">
+                            letter-spacing:0.1em; font-weight:600;">📄 Report #{rid}</div>
+                <div style="font-size:1.18rem; font-weight:800; color:#f1f5f9; margin-top:5px;
+                            letter-spacing:-0.01em;">
                     {row["Report_Title"]}
                 </div>
-                <div style="color:#94a3b8; font-size:0.82rem; margin-top:5px;">
-                    {row["Dept_Name"]} &nbsp;·&nbsp; {row["Cat_Name"]}
+                <div style="color:#64748b; font-size:0.8rem; margin-top:6px;">
+                    <span style="background:#1e2d45; padding:2px 8px; border-radius:5px;
+                                 color:#94a3b8; font-size:0.75rem;">{row["Dept_Name"]}</span>
+                    &nbsp;
+                    <span style="background:#1e2d45; padding:2px 8px; border-radius:5px;
+                                 color:#94a3b8; font-size:0.75rem;">{row["Cat_Name"]}</span>
                 </div>
             </div>
             <div style="text-align:right;">
-                <div style="font-size:1.55rem; font-weight:800; color:#f1f5f9;">
+                <div style="font-size:1.65rem; font-weight:900; color:#f1f5f9;
+                            letter-spacing:-0.02em;">
                     ₱{float(row["Exp_TotalAmount"]):,.2f}
                 </div>
                 <div style="font-size:0.72rem; color:#64748b; margin-top:2px;">
                     Purchased: {str(row["Purchase_Date"])[:10]}
                 </div>
                 <div style="margin-top:8px;">
-                    <span style="background:{s_color}22; color:{s_color};
-                                 border:1px solid {s_color}; border-radius:6px;
-                                 padding:3px 12px; font-size:0.72rem; font-weight:700;">
+                    <span style="background:{s_color}1a; color:{s_color};
+                                 border:1px solid {s_color}55; border-radius:99px;
+                                 padding:4px 14px; font-size:0.72rem; font-weight:700;
+                                 letter-spacing:0.03em;">
                         {s_emoji} {s_lbl}
                     </span>
                 </div>
@@ -306,23 +318,26 @@ def show_report_modal(rid: int):
     r1, r2, r3 = st.columns([1, 1, 2])
 
     with r1:
-        # Circular gauge with correct risk colour
-        _circ_bg  = f"conic-gradient({risk_color} {risk_score*3.6:.0f}deg, #1e293b 0deg)"
+        # Animated circular gauge
+        _circ_bg  = f"conic-gradient({risk_color} {risk_score*3.6:.0f}deg, #1a2235 0deg)"
         st.markdown(f"""
-        <div style="position:relative; width:108px; height:108px; margin:0 auto;">
+        <div style="position:relative; width:112px; height:112px; margin:0 auto;
+                    animation:fadeIn 0.5s ease 0.1s both;">
           <div style="position:absolute; inset:0; border-radius:50%;
-                      background:{_circ_bg};"></div>
-          <div style="position:absolute; inset:7px; border-radius:50%;
-                      background:#0f1117; display:flex; flex-direction:column;
+                      background:{_circ_bg}; box-shadow:0 0 20px {risk_color}33;"></div>
+          <div style="position:absolute; inset:8px; border-radius:50%;
+                      background:#0a0d14; display:flex; flex-direction:column;
                       align-items:center; justify-content:center;">
-            <div style="font-size:1.45rem; font-weight:800; color:{risk_color}; line-height:1;">{risk_score:.0f}%</div>
-            <div style="font-size:0.55rem; color:#64748b; letter-spacing:0.07em; margin-top:2px;">AI RISK</div>
+            <div style="font-size:1.45rem; font-weight:900; color:{risk_color};
+                        line-height:1; letter-spacing:-0.02em;">{risk_score:.0f}%</div>
+            <div style="font-size:0.5rem; color:#64748b; letter-spacing:0.1em;
+                        margin-top:3px; text-transform:uppercase;">AI RISK</div>
           </div>
         </div>
         """, unsafe_allow_html=True)
 
     with r2:
-        t_icon = "🚨" if triage_lbl == "AUDIT FLAG" else "⚠️"
+        t_icon = "🚨" if triage_lbl == "AUDIT FLAG" else "⚠️" if triage_lbl == "STANDARD REVIEW" else "✅"
         st.markdown(f"""
         <div style="background:{triage_color}18; border:1px solid {triage_color};
                     border-radius:10px; padding:12px 14px; text-align:center;">
@@ -904,6 +919,22 @@ def show_report_modal(rid: int):
         }
         msg_type, msg_text = STATUS_MSG.get(exp_status, ("info", f"Status: {exp_status}"))
         getattr(st, msg_type)(msg_text)
+        # ── Resubmit button for rejected reports ──────────────────────────────
+        if is_rejected:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="btn-edit">', unsafe_allow_html=True)
+            if st.button("🔄 Resubmit This Report", key=f"resubmit_{rid}", use_container_width=True):
+                try:
+                    db.resubmit_report(rid)
+                    st.success(
+                        f"Report **#{rid}** resubmitted — now **Pending Manager Review** again.",
+                        icon="✅",
+                    )
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Resubmit failed: {exc}")
+            st.markdown("</div>", unsafe_allow_html=True)
         st.caption("All decisions are made by authorised Managers and Finance Officers.")
 
 

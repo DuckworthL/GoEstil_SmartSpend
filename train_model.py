@@ -3,8 +3,10 @@ import numpy as np
 import joblib
 import json
 import shap
-from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, recall_score, precision_score,
@@ -114,75 +116,74 @@ FEATURE_COLS = [
     "Exp_TotalAmount", "IsAffidavit", "ExpCat_ID", "Dept_ID",
     "Submission_Gap", "Is_Weekend", "Is_Round_Number",
 ]
-CAT_COLS = ["IsAffidavit", "ExpCat_ID", "Dept_ID", "Is_Weekend", "Is_Round_Number"]
 
-X = df[FEATURE_COLS].copy()
+# Both pipelines use StandardScaler — keep all features as float
+X = df[FEATURE_COLS].copy().astype(float)
 y = df["Label"]
-
-for col in CAT_COLS:
-    X[col] = X[col].astype("category")
 
 # ── 5. Train / test split ─────────────────────────────────────────────────────
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# ── 6. Train LightGBM ────────────────────────────────────────────────────────
+# ── 6. Train XGBoost — Pipeline: StandardScaler → XGBClassifier ──────────────
 neg_count = (y_train == 0).sum()
 pos_count = (y_train == 1).sum()
 imbalance_ratio = neg_count / pos_count
 print(f"Class imbalance ratio (scale_pos_weight): {imbalance_ratio:.2f}")
 
-lgbm = LGBMClassifier(n_estimators=300, learning_rate=0.05, num_leaves=31,
-                      scale_pos_weight=imbalance_ratio,
-                      random_state=42, verbose=-1)
-lgbm.fit(X_train, y_train)
+xgb_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("xgb",    XGBClassifier(
+        n_estimators=300, learning_rate=0.05, max_depth=6,
+        scale_pos_weight=imbalance_ratio,
+        random_state=42, eval_metric="logloss", verbosity=0,
+    )),
+])
+xgb_pipeline.fit(X_train, y_train)
 
-# ── 7. Train Decision Tree ────────────────────────────────────────────────────
-# Decision Tree needs numeric categories
-X_train_dt = X_train.copy()
-X_test_dt  = X_test.copy()
-for col in CAT_COLS:
-    X_train_dt[col] = X_train_dt[col].cat.codes
-    X_test_dt[col]  = X_test_dt[col].cat.codes
-
-dt = DecisionTreeClassifier(max_depth=6, random_state=42)
-dt.fit(X_train_dt, y_train)
+# ── 7. Train Decision Tree — Pipeline: StandardScaler → DecisionTreeClassifier ─
+dt_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("dt",     DecisionTreeClassifier(max_depth=6, random_state=42)),
+])
+dt_pipeline.fit(X_train, y_train)
 
 # ── 8. Helper: compute all metrics ───────────────────────────────────────────
-def compute_metrics(model, X_t, y_t, model_name, needs_numeric=False, threshold=0.40):
-    y_proba = model.predict_proba(X_t)[:, 1]
+def compute_metrics(pipeline, X_t, y_t, model_name, threshold=0.40):
+    y_proba = pipeline.predict_proba(X_t)[:, 1]
     y_pred  = (y_proba >= threshold).astype(int)
     cm      = confusion_matrix(y_t, y_pred)
     tn, fp, fn, tp = cm.ravel()
-    report  = classification_report(y_t, y_pred, output_dict=True)
     return {
-        "model":              model_name,
-        "accuracy":           round(accuracy_score(y_t, y_pred) * 100, 2),
-        "recall_rejected":    round(recall_score(y_t, y_pred) * 100, 2),
-        "precision_approved": round(precision_score(y_t, y_pred, pos_label=0) * 100, 2),
-        "f1_score":           round(f1_score(y_t, y_pred) * 100, 2),
-        "auc_roc":            round(roc_auc_score(y_t, y_proba) * 100, 2),
-        "confusion_matrix":   {"TP": int(tp), "TN": int(tn), "FP": int(fp), "FN": int(fn)},
-        "total_test":         int(len(y_t)),
-        "total_flagged":      int(sum(y_pred)),
-        "total_cleared":      int(len(y_pred) - sum(y_pred)),
+        "model":               model_name,
+        "accuracy":            round(accuracy_score(y_t, y_pred) * 100, 2),
+        "recall_rejected":     round(recall_score(y_t, y_pred) * 100, 2),
+        "precision_approved":  round(precision_score(y_t, y_pred, pos_label=0) * 100, 2),
+        "f1_score":            round(f1_score(y_t, y_pred) * 100, 2),
+        "auc_roc":             round(roc_auc_score(y_t, y_proba) * 100, 2),
+        "confusion_matrix":    {"TP": int(tp), "TN": int(tn), "FP": int(fp), "FN": int(fn)},
+        "total_test":          int(len(y_t)),
+        "total_flagged":       int(sum(y_pred)),
+        "total_cleared":       int(len(y_pred) - sum(y_pred)),
         "false_negative_rate": round((fn / (fn + tp)) * 100, 2) if (fn + tp) > 0 else 0,
         "false_positive_rate": round((fp / (fp + tn)) * 100, 2) if (fp + tn) > 0 else 0,
     }
 
-lgbm_metrics = compute_metrics(lgbm, X_test,    y_test, "LightGBM")
-dt_metrics   = compute_metrics(dt,   X_test_dt, y_test, "Decision Tree")
+xgb_metrics = compute_metrics(xgb_pipeline, X_test, y_test, "XGBoost")
+dt_metrics  = compute_metrics(dt_pipeline,  X_test, y_test, "Decision Tree")
 
-print("\n── LightGBM ──")
-print(classification_report(y_test, lgbm.predict(X_test), target_names=["Normal (0)", "Flagged (1)"]))
+print("\n── XGBoost ──")
+print(classification_report(y_test, xgb_pipeline.predict(X_test), target_names=["Normal (0)", "Flagged (1)"]))
 print("\n── Decision Tree ──")
-print(classification_report(y_test, dt.predict(X_test_dt), target_names=["Normal (0)", "Flagged (1)"]))
+print(classification_report(y_test, dt_pipeline.predict(X_test), target_names=["Normal (0)", "Flagged (1)"]))
 
-# ── 9. SHAP values for LightGBM ───────────────────────────────────────────────
+# ── 9. SHAP values for XGBoost ───────────────────────────────────────────────
 print("Computing SHAP values...")
-explainer   = shap.TreeExplainer(lgbm)
-shap_values = explainer.shap_values(X_test)
+# Extract scaled test data and the underlying XGB estimator from the pipeline
+X_test_scaled = xgb_pipeline.named_steps["scaler"].transform(X_test)
+explainer     = shap.TreeExplainer(xgb_pipeline.named_steps["xgb"])
+shap_values   = explainer.shap_values(X_test_scaled)
 
 # For binary classification shap_values may be a list [class0, class1]
 if isinstance(shap_values, list):
@@ -197,26 +198,24 @@ shap_importance = {
 }
 
 # ── 10. Business impact estimates ─────────────────────────────────────────────
-total      = len(y_test)
-cm_lgbm    = lgbm_metrics["confusion_matrix"]
-audit_flag_count    = int(sum(
-    1 for p, s in zip(lgbm.predict_proba(X_test)[:, 1], lgbm.predict(X_test))
+total            = len(y_test)
+audit_flag_count = int(sum(
+    1 for p in xgb_pipeline.predict_proba(X_test)[:, 1]
     if p * 100 >= 70
 ))
-std_review_count    = total - audit_flag_count
-fn_cost_proxy       = lgbm_metrics["false_negative_rate"]
+std_review_count = total - audit_flag_count
 
 business_impact = {
     "standard_review_pct": round((std_review_count / total) * 100, 1),
     "audit_flag_pct":      round((audit_flag_count  / total) * 100, 1),
-    "false_negative_rate": lgbm_metrics["false_negative_rate"],
-    "false_positive_rate": lgbm_metrics["false_positive_rate"],
+    "false_negative_rate": xgb_metrics["false_negative_rate"],
+    "false_positive_rate": xgb_metrics["false_positive_rate"],
     "total_test_records":  total,
 }
 
 # ── 11. Save everything to JSON ───────────────────────────────────────────────
 output = {
-    "lgbm":            lgbm_metrics,
+    "xgb":             xgb_metrics,
     "decision_tree":   dt_metrics,
     "shap_importance": shap_importance,
     "business_impact": business_impact,
@@ -228,7 +227,7 @@ with open("model_metrics.json", "w") as f:
 print("\n✅ model_metrics.json saved.")
 
 # ── 12. Save models ───────────────────────────────────────────────────────────
-joblib.dump(lgbm, "lgbm_model.pkl")
-joblib.dump(dt,   "dt_model.pkl")
-print("✅ lgbm_model.pkl and dt_model.pkl saved.")
+joblib.dump(xgb_pipeline, "xgb_model.pkl")
+joblib.dump(dt_pipeline,  "dt_model.pkl")
+print("✅ xgb_model.pkl and dt_model.pkl saved.")
 

@@ -7,7 +7,7 @@ import joblib
 import pandas as pd
 
 # ── Model ─────────────────────────────────────────────────────────────────────
-MODEL_PATH = "lgbm_model.pkl"
+MODEL_PATH = "xgb_model.pkl"
 
 def load_model():
     return joblib.load(MODEL_PATH)
@@ -90,6 +90,7 @@ def apply_business_rules(score: float, row: dict) -> tuple[float, list[tuple[str
          Very high-value ≥ ₱100,000                 → +25 pts (replaces #7)
     """
     boosts: list[tuple[str, int]] = []
+    raw_ml_score = score          # preserve original ML probability for threshold check
     gap = int(row.get("SubmissionGap", 1))
     amt = float(row.get("Exp_TotalAmount", 0))
 
@@ -134,8 +135,8 @@ def apply_business_rules(score: float, row: dict) -> tuple[float, list[tuple[str
         score += 15
         boosts.append((f"High-Value Expense ≥ ₱{LARGE_AMOUNT_CAUTION:,.0f}", 15))
 
-    # 8. ML anomaly bridge — raw model probability crossed the 40 % anomaly threshold
-    if score >= ML_ANOMALY_THRESHOLD:
+    # 8. ML anomaly bridge — fires only when raw ML probability ≥ 40%
+    if raw_ml_score >= ML_ANOMALY_THRESHOLD:
         score += ML_ANOMALY_BOOST
         boosts.append((f"High ML Anomaly Probability (Base Score ≥ {ML_ANOMALY_THRESHOLD}%)", int(ML_ANOMALY_BOOST)))
 
@@ -146,7 +147,9 @@ def get_triage(score: float) -> tuple[str, str]:
     """Return (triage_label, hex_colour)."""
     if score >= 70:
         return "AUDIT FLAG", "#ef4444"
-    return "STANDARD REVIEW", "#f59e0b"
+    if score >= 40:
+        return "STANDARD REVIEW", "#f59e0b"
+    return "LOW RISK", "#22c55e"
 
 
 def get_risk_factors(row: dict, raw_ml_prob: float = 0.0) -> list[str]:
@@ -211,7 +214,7 @@ def get_risk_factors(row: dict, raw_ml_prob: float = 0.0) -> list[str]:
     # ML anomaly signal
     if raw_ml_prob >= ML_ANOMALY_THRESHOLD:
         factors.append(
-            "LightGBM model detected high-risk anomalous patterns in the submission data (Score >= 40%)."
+            "XGBoost model detected high-risk anomalous patterns in the submission data (Score >= 40%)."
         )
 
     return factors
@@ -225,18 +228,16 @@ def predict_risk(row: dict) -> tuple[float, float, list[tuple[str, int]]]:
     model = load_model()
 
     df = pd.DataFrame([{
-        "Exp_TotalAmount":  row["Exp_TotalAmount"],
-        "IsAffidavit":      row["IsAffidavit"],
-        "ExpCat_ID":        row["ExpCat_ID"],
-        "Dept_ID":          row["Dept_ID"],
-        "Submission_Gap":   row["SubmissionGap"],
-        "Is_Weekend":       row.get("Is_Weekend", 0),
-        "Is_Round_Number":  row.get("Is_Round_Number", 0),
+        "Exp_TotalAmount":  float(row["Exp_TotalAmount"]),
+        "IsAffidavit":      float(row["IsAffidavit"]),
+        "ExpCat_ID":        float(row["ExpCat_ID"]),
+        "Dept_ID":          float(row["Dept_ID"]),
+        "Submission_Gap":   float(row["SubmissionGap"]),
+        "Is_Weekend":       float(row.get("Is_Weekend", 0)),
+        "Is_Round_Number":  float(row.get("Is_Round_Number", 0)),
     }])
 
-    for col in CAT_COLS:
-        df[col] = df[col].astype("category")
-
+    # Pipeline (StandardScaler + XGBClassifier) handles scaling internally
     raw_prob   = float(model.predict_proba(df)[0][1]) * 100.0
     final, boosts = apply_business_rules(raw_prob, row)
     return raw_prob, final, boosts
@@ -301,135 +302,449 @@ def render_user_sidebar() -> None:
     st.sidebar.markdown("---")
 
 
-# ── Shared dark-theme CSS ─────────────────────────────────────────────────────
+# ── Shared dark-theme CSS + JS ────────────────────────────────────────────────
 DARK_CSS = """
 <style>
-/* ── global reset ────────────────────────────────────────────── */
-html, body, [data-testid="stAppViewContainer"],
-[data-testid="stHeader"], [data-testid="stToolbar"] {
-    background-color: #0f1117 !important;
+/* ══ CSS VARIABLES ══════════════════════════════════════════════ */
+:root {
+    --bg-base:      #0a0d14;
+    --bg-surface:   #111827;
+    --bg-card:      #141a26;
+    --bg-elevated:  #1a2235;
+    --border:       #1e2d45;
+    --border-glow:  #2d4a7a;
+    --accent:       #3b82f6;
+    --accent-dark:  #1d4ed8;
+    --accent-glow:  rgba(59,130,246,0.18);
+    --green:        #22c55e;
+    --green-glow:   rgba(34,197,94,0.15);
+    --amber:        #f59e0b;
+    --amber-glow:   rgba(245,158,11,0.15);
+    --red:          #ef4444;
+    --red-glow:     rgba(239,68,68,0.15);
+    --text-primary: #f1f5f9;
+    --text-muted:   #64748b;
+    --text-sub:     #94a3b8;
+}
+
+/* ══ KEYFRAME ANIMATIONS ════════════════════════════════════════ */
+@keyframes fadeInUp {
+    from { opacity:0; transform:translateY(18px); }
+    to   { opacity:1; transform:translateY(0);    }
+}
+@keyframes fadeIn {
+    from { opacity:0; }
+    to   { opacity:1; }
+}
+@keyframes slideInLeft {
+    from { opacity:0; transform:translateX(-20px); }
+    to   { opacity:1; transform:translateX(0);     }
+}
+@keyframes pulse {
+    0%,100% { opacity:1; }
+    50%      { opacity:0.55; }
+}
+@keyframes shimmer {
+    0%   { background-position: -400px 0; }
+    100% { background-position:  400px 0; }
+}
+@keyframes glow-ring {
+    0%,100% { box-shadow: 0 0 0 0   var(--accent-glow); }
+    50%      { box-shadow: 0 0 16px 4px var(--accent-glow); }
+}
+@keyframes spin-gauge {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+@keyframes countUp {
+    from { transform:scale(0.7); opacity:0; }
+    to   { transform:scale(1);   opacity:1; }
+}
+
+/* ══ GLOBAL RESET ═══════════════════════════════════════════════ */
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stToolbar"] {
+    background-color: var(--bg-base) !important;
     color: #e2e8f0 !important;
 }
+[data-testid="stMainBlockContainer"] {
+    animation: fadeIn 0.45s ease;
+}
+
+/* ══ SIDEBAR ════════════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
-    background-color: #1a1f2e !important;
-    border-right: 1px solid #2d3561;
+    background: linear-gradient(180deg, #0f1523 0%, #111827 100%) !important;
+    border-right: 1px solid var(--border) !important;
 }
 [data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-
-/* ── typography ──────────────────────────────────────────────── */
-h1, h2, h3, h4, h5, h6 { color: #f1f5f9 !important; }
-p, li, span, label       { color: #cbd5e1 !important; }
-.stMarkdown              { color: #cbd5e1; }
-code, pre                { background: #1e293b !important; color: #7dd3fc !important; }
-
-/* ── metric cards ────────────────────────────────────────────── */
-[data-testid="metric-container"] {
-    background: #1a1f2e;
-    border: 1px solid #2d3561;
-    border-radius: 12px;
-    padding: 16px 20px;
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div,
+[data-testid="stSidebar"] input {
+    background: #0f1523 !important;
+    border-color: var(--border) !important;
 }
-[data-testid="stMetricLabel"]  { color: #94a3b8 !important; font-size: 0.78rem; }
-[data-testid="stMetricValue"]  { color: #f1f5f9 !important; font-weight: 700; }
 
-/* ── inputs ──────────────────────────────────────────────────── */
+/* ══ TYPOGRAPHY ═════════════════════════════════════════════════ */
+h1, h2, h3 { color: var(--text-primary) !important; letter-spacing:-0.02em; }
+h4, h5, h6 { color: var(--text-primary) !important; }
+p, li, span, label { color: #cbd5e1 !important; }
+.stMarkdown { color: #cbd5e1; }
+code, pre {
+    background: #1a2235 !important;
+    color: #7dd3fc !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+}
+
+/* ══ METRIC CARDS ════════════════════════════════════════════════ */
+[data-testid="metric-container"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    padding: 18px 20px !important;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s !important;
+    animation: fadeInUp 0.4s ease both;
+}
+[data-testid="metric-container"]:hover {
+    border-color: var(--border-glow) !important;
+    box-shadow: 0 4px 24px rgba(59,130,246,0.12) !important;
+    transform: translateY(-2px) !important;
+}
+[data-testid="stMetricLabel"] {
+    color: var(--text-muted) !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.07em !important;
+}
+[data-testid="stMetricValue"] {
+    color: var(--text-primary) !important;
+    font-weight: 800 !important;
+    font-size: 1.5rem !important;
+    animation: countUp 0.35s cubic-bezier(.34,1.56,.64,1) both;
+}
+
+/* ══ INPUT FIELDS ════════════════════════════════════════════════ */
 .stTextInput > div > div > input,
 .stTextArea  > div > div > textarea,
-.stNumberInput > div > div > input,
+.stNumberInput > div > div > input {
+    background-color: var(--bg-elevated) !important;
+    color: #e2e8f0 !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 9px !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+.stTextInput > div > div > input:focus,
+.stTextArea  > div > div > textarea:focus,
+.stNumberInput > div > div > input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-glow) !important;
+    outline: none !important;
+}
 .stSelectbox > div > div,
 .stMultiSelect > div > div {
-    background-color: #1e293b !important;
+    background-color: var(--bg-elevated) !important;
     color: #e2e8f0 !important;
-    border: 1px solid #334155 !important;
-    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 9px !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+.stSelectbox > div > div:focus-within,
+.stMultiSelect > div > div:focus-within {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-glow) !important;
 }
 .stDateInput > div > div > input {
-    background-color: #1e293b !important;
+    background-color: var(--bg-elevated) !important;
     color: #e2e8f0 !important;
-    border: 1px solid #334155 !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 9px !important;
 }
 
-/* ── buttons ─────────────────────────────────────────────────── */
+/* ══ BUTTONS ═════════════════════════════════════════════════════ */
 .stButton > button {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
     color: #fff !important;
     border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    padding: 0.55rem 1.4rem !important;
-    transition: opacity 0.2s;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 0.88rem !important;
+    letter-spacing: 0.01em !important;
+    padding: 0.6rem 1.6rem !important;
+    transition: all 0.2s cubic-bezier(.34,1.56,.64,1) !important;
+    box-shadow: 0 2px 12px rgba(37,99,235,0.25) !important;
+    position: relative !important;
+    overflow: hidden !important;
 }
-.stButton > button:hover { opacity: 0.88 !important; }
+.stButton > button:hover {
+    transform: translateY(-2px) scale(1.02) !important;
+    box-shadow: 0 6px 24px rgba(37,99,235,0.4) !important;
+}
+.stButton > button:active {
+    transform: translateY(0) scale(0.98) !important;
+}
 
-/* ── approve/reject action buttons ──────────────────────────── */
-.btn-approve > button {
+/* ── Coloured action button overrides ─────────── */
+.btn-approve button {
     background: linear-gradient(135deg, #16a34a, #15803d) !important;
+    box-shadow: 0 2px 12px rgba(22,163,74,0.3) !important;
 }
-.btn-reject > button {
+.btn-approve button:hover { box-shadow: 0 6px 24px rgba(22,163,74,0.45) !important; }
+.btn-reject button {
     background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+    box-shadow: 0 2px 12px rgba(220,38,38,0.3) !important;
 }
+.btn-reject button:hover { box-shadow: 0 6px 24px rgba(220,38,38,0.45) !important; }
+.btn-pay button {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    box-shadow: 0 2px 12px rgba(37,99,235,0.3) !important;
+    font-size: 1rem !important;
+}
+.btn-pay button:hover { box-shadow: 0 6px 24px rgba(37,99,235,0.45) !important; }
+.btn-edit button {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+    box-shadow: 0 2px 12px rgba(124,58,237,0.3) !important;
+}
+.btn-edit button:hover { box-shadow: 0 6px 24px rgba(124,58,237,0.45) !important; }
+.btn-submit button {
+    background: linear-gradient(135deg, #16a34a, #15803d) !important;
+    box-shadow: 0 2px 12px rgba(22,163,74,0.3) !important;
+    font-size: 1rem !important; font-weight: 700 !important;
+}
+.btn-submit button:hover { box-shadow: 0 6px 24px rgba(22,163,74,0.45) !important; }
+.btn-delete button {
+    background: linear-gradient(135deg, #dc2626, #991b1b) !important;
+    box-shadow: 0 2px 12px rgba(220,38,38,0.3) !important;
+    font-weight: 700 !important;
+}
+.btn-delete button:hover { box-shadow: 0 6px 24px rgba(220,38,38,0.45) !important; }
 
-/* ── expanders ───────────────────────────────────────────────── */
+/* ══ EXPANDERS ═══════════════════════════════════════════════════ */
 .streamlit-expanderHeader {
-    background: #1a1f2e !important;
-    border: 1px solid #2d3561 !important;
-    border-radius: 8px !important;
-    color: #94a3b8 !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text-sub) !important;
+    transition: border-color 0.2s, background 0.2s !important;
+}
+.streamlit-expanderHeader:hover {
+    border-color: var(--border-glow) !important;
+    background: var(--bg-elevated) !important;
 }
 .streamlit-expanderContent {
-    background: #0f1117 !important;
-    border: 1px solid #2d3561 !important;
-    border-radius: 0 0 8px 8px !important;
+    background: var(--bg-base) !important;
+    border: 1px solid var(--border) !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
 }
 
-/* ── data frames ─────────────────────────────────────────────── */
+/* ══ DATA FRAMES ═════════════════════════════════════════════════ */
 [data-testid="stDataFrame"] {
-    border-radius: 8px;
-    border: 1px solid #2d3561;
+    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+    overflow: hidden !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
 }
 .dataframe thead th {
-    background: #1a1f2e !important;
-    color: #94a3b8 !important;
+    background: var(--bg-elevated) !important;
+    color: var(--text-sub) !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.07em !important;
 }
 .dataframe tbody td {
-    background: #0f1117 !important;
+    background: var(--bg-base) !important;
     color: #e2e8f0 !important;
-    border-color: #1e293b !important;
+    border-color: var(--border) !important;
+    transition: background 0.15s !important;
 }
+.dataframe tbody tr:hover td { background: var(--bg-card) !important; }
 
-/* ── tabs ────────────────────────────────────────────────────── */
+/* ══ TABS ════════════════════════════════════════════════════════ */
+[data-testid="stTabs"] {
+    border-bottom: 1px solid var(--border) !important;
+}
 [data-testid="stTabs"] button {
-    color: #94a3b8 !important;
+    color: var(--text-muted) !important;
+    border-radius: 8px 8px 0 0 !important;
+    transition: color 0.2s, background 0.2s !important;
+    font-weight: 600 !important;
+}
+[data-testid="stTabs"] button:hover {
+    color: var(--text-sub) !important;
+    background: var(--bg-elevated) !important;
 }
 [data-testid="stTabs"] button[aria-selected="true"] {
-    color: #2563eb !important;
-    border-bottom-color: #2563eb !important;
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent) !important;
+    background: rgba(59,130,246,0.07) !important;
 }
 
-/* ── divider ─────────────────────────────────────────────────── */
-hr { border-color: #1e293b !important; }
-
-/* ── info / warning / error boxes ───────────────────────────── */
+/* ══ ALERT / INFO BOXES ══════════════════════════════════════════ */
 [data-testid="stAlert"] {
-    border-radius: 8px !important;
-    background: #1a1f2e !important;
-    border: 1px solid #2d3561 !important;
+    border-radius: 10px !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    animation: fadeInUp 0.3s ease !important;
 }
 
-/* ── upload widget ───────────────────────────────────────────── */
+/* ══ DIVIDER ═════════════════════════════════════════════════════ */
+hr { border-color: var(--border) !important; margin: 1.2rem 0 !important; }
+
+/* ══ UPLOAD WIDGET ═══════════════════════════════════════════════ */
 [data-testid="stFileUploader"] {
-    background: #1a1f2e !important;
-    border: 1px dashed #334155 !important;
-    border-radius: 8px !important;
+    background: var(--bg-card) !important;
+    border: 1.5px dashed var(--border-glow) !important;
+    border-radius: 12px !important;
+    transition: border-color 0.2s, background 0.2s !important;
+}
+[data-testid="stFileUploader"]:hover {
+    background: var(--bg-elevated) !important;
+    border-color: var(--accent) !important;
 }
 
-/* ── toggle ──────────────────────────────────────────────────── */
+/* ══ TOGGLE ══════════════════════════════════════════════════════ */
 [data-testid="stToggle"] label { color: #cbd5e1 !important; }
 
-/* ── scrollbar ───────────────────────────────────────────────── */
-::-webkit-scrollbar               { width: 6px; height: 6px; }
-::-webkit-scrollbar-track         { background: #0f1117; }
-::-webkit-scrollbar-thumb         { background: #334155; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover   { background: #475569; }
+/* ══ PROGRESS BAR ════════════════════════════════════════════════ */
+[data-testid="stProgress"] > div {
+    background: var(--border) !important;
+    border-radius: 99px !important;
+}
+[data-testid="stProgress"] > div > div {
+    border-radius: 99px !important;
+    background: linear-gradient(90deg, var(--accent), #818cf8) !important;
+    transition: width 0.6s ease !important;
+}
+
+/* ══ SCROLLBAR ═══════════════════════════════════════════════════ */
+::-webkit-scrollbar               { width: 5px; height: 5px; }
+::-webkit-scrollbar-track         { background: var(--bg-base); }
+::-webkit-scrollbar-thumb         { background: #2d3f5e; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover   { background: #3d5580; }
+
+/* ══ HINT TEXT CLASS ═════════════════════════════════════════════ */
+.click-hint {
+    font-size: 0.78rem; color: var(--text-muted);
+    margin-bottom: 8px; font-style: italic;
+}
+
+/* ══ CARD GLASS CLASS ════════════════════════════════════════════ */
+.glass-card {
+    background: rgba(20,26,38,0.85) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(45,73,122,0.5) !important;
+    border-radius: 16px !important;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s !important;
+}
+.glass-card:hover {
+    border-color: rgba(59,130,246,0.4) !important;
+    box-shadow: 0 8px 32px rgba(59,130,246,0.12) !important;
+    transform: translateY(-3px) !important;
+}
+
+/* ══ STATUS BADGE CLASS ══════════════════════════════════════════ */
+.status-badge {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+/* ══ ANIMATED PULSE DOT ══════════════════════════════════════════ */
+.pulse-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 1.8s ease-in-out infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.pulse-dot.green  { background: var(--green); }
+.pulse-dot.red    { background: var(--red); }
+.pulse-dot.blue   { background: var(--accent); }
+
+/* ══ SHIMMER SKELETON LOADER ═════════════════════════════════════ */
+.shimmer {
+    background: linear-gradient(90deg,
+        var(--bg-card) 25%, var(--bg-elevated) 50%, var(--bg-card) 75%);
+    background-size: 400px 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: 8px;
+}
+
+/* ══ PAGE SECTION ANIMATION ══════════════════════════════════════ */
+.section-enter {
+    animation: fadeInUp 0.45s cubic-bezier(.22,1,.36,1) both;
+}
+.section-enter:nth-child(2) { animation-delay: 0.06s; }
+.section-enter:nth-child(3) { animation-delay: 0.12s; }
+.section-enter:nth-child(4) { animation-delay: 0.18s; }
 </style>
+<script>
+/* ── Animated counter for metric values ───────────────────────── */
+(function() {
+  function animateCounter(el) {
+    const raw = el.innerText.replace(/[^0-9.]/g,'');
+    const target = parseFloat(raw);
+    if (isNaN(target) || target === 0) return;
+    const prefix = el.innerText.match(/^[^0-9]*/)?.[0] || '';
+    const suffix = el.innerText.match(/[^0-9.]+$/)?.[0] || '';
+    const decimals = (raw.split('.')[1] || '').length;
+    const duration = 600;
+    const start = performance.now();
+    function tick(now) {
+      const t = Math.min((now - start) / duration, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      el.innerText = prefix + (target * ease).toFixed(decimals) + suffix;
+      if (t < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  function runCounters() {
+    document.querySelectorAll('[data-testid="stMetricValue"]').forEach(animateCounter);
+  }
+  /* run on every Streamlit re-render */
+  const obs = new MutationObserver(() => runCounters());
+  obs.observe(document.body, { childList: true, subtree: true });
+  runCounters();
+})();
+
+/* ── Row hover glow on data tables ────────────────────────────── */
+(function() {
+  function addTableHovers() {
+    document.querySelectorAll('[data-testid="stDataFrame"] tbody tr').forEach(tr => {
+      if (tr.dataset.hovInit) return;
+      tr.dataset.hovInit = '1';
+      tr.addEventListener('mouseenter', () => {
+        tr.style.background = 'rgba(59,130,246,0.07)';
+        tr.style.transition  = 'background 0.15s';
+      });
+      tr.addEventListener('mouseleave', () => {
+        tr.style.background = '';
+      });
+    });
+  }
+  const obs2 = new MutationObserver(addTableHovers);
+  obs2.observe(document.body, { childList: true, subtree: true });
+  addTableHovers();
+})();
+
+/* ── Smooth scroll-into-view for alerts ───────────────────────── */
+(function() {
+  function watchAlerts() {
+    document.querySelectorAll('[data-testid="stAlert"]').forEach(el => {
+      if (el.dataset.scrolled) return;
+      el.dataset.scrolled = '1';
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+  const obs3 = new MutationObserver(watchAlerts);
+  obs3.observe(document.body, { childList: true, subtree: true });
+})();
+</script>
 """

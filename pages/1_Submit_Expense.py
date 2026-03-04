@@ -54,12 +54,17 @@ db_ok = db.is_db_available()
 
 # ── Page header ───────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
-  <span style="font-size:2rem;">📋</span>
+<div style="display:flex; align-items:center; gap:14px; margin-bottom:6px;
+            animation:fadeInUp 0.45s cubic-bezier(.22,1,.36,1) both;">
+  <div style="width:48px; height:48px; border-radius:14px;
+              background:linear-gradient(135deg,#15803d,#22c55e);
+              display:flex; align-items:center; justify-content:center;
+              font-size:1.5rem; box-shadow:0 4px 16px rgba(34,197,94,0.28);">📋</div>
   <div>
-    <h2 style="margin:0; color:#f1f5f9;">Submit Expense Report</h2>
-    <p style="color:#64748b; margin:0; font-size:0.85rem;">
-      Fill in your details → AI analyses risk → review results → save to the database.
+    <h2 style="margin:0; font-size:1.55rem; font-weight:800;
+               letter-spacing:-0.02em; color:#f1f5f9;">Submit Expense Report</h2>
+    <p style="color:#64748b; margin:0; font-size:0.82rem;">
+      Fill in details → AI analyses risk → review results → save to the database.
     </p>
   </div>
 </div>
@@ -100,15 +105,15 @@ if "analysis" not in st.session_state:
             st.rerun()
 
         if col_s2.button("⚠️ Load Medium-Risk Sample", use_container_width=True, key="preset_mid"):
-            st.session_state["_pre_title"]    = "Marketing Conference — Manila Hotel"
-            st.session_state["_pre_cat"]      = 3       # Accommodation
-            st.session_state["_pre_dept"]     = 103     # Marketing
-            st.session_state["_pre_amount"]   = 12500.0 # Mid-range, round number
-            st.session_state["_pre_gap"]      = 25      # 25 days later
-            st.session_state["_pre_seller"]   = "Manila Hotel Corp"
-            st.session_state["_pre_pay"]      = "Personal Credit Card"
-            st.session_state["_pre_desc"]     = "2-night accommodation for National Marketing Summit. Receipt attached."
-            st.session_state["_pre_receipt"]  = True
+            st.session_state["_pre_title"]    = "Office Supplies Restock — Q1 Operations"
+            st.session_state["_pre_cat"]      = 4       # Office Supplies
+            st.session_state["_pre_dept"]     = 105     # HR/Operations
+            st.session_state["_pre_amount"]   = 3000.0  # Round number → +15 pts
+            st.session_state["_pre_gap"]      = 8       # 8 days — recent but not suspicious
+            st.session_state["_pre_seller"]   = "Office Warehouse Makati"
+            st.session_state["_pre_pay"]      = "Cash"
+            st.session_state["_pre_desc"]     = "Quarterly office supply restock. Affidavit of loss filed for missing receipt."
+            st.session_state["_pre_receipt"]  = False   # No receipt → +15 pts
             st.rerun()
 
         if col_s3.button("🚨 Load High-Risk Sample",  use_container_width=True, key="preset_hi"):
@@ -128,13 +133,13 @@ if "analysis" not in st.session_state:
         st.markdown("""
         | | ✅ Low Risk | ⚠️ Medium Risk | 🚨 High Risk |
         |---|---|---|---|
-        | Amount | ₱1,250 | ₱12,500 | ₱25,000 |
-        | Category | Meals | Accommodation | Meals |
-        | Submission Gap | 3 days | 25 days | 0 days (same day) |
-        | Receipt | ✅ Yes | ✅ Yes | ❌ No |
+        | Amount | ₱1,250 | ₱3,000 | ₱25,000 |
+        | Category | Meals | Office Supplies | Meals |
+        | Submission Gap | 3 days | 8 days | 0 days (same day) |
+        | Receipt | ✅ Yes | ❌ No (+15) | ❌ No (+15) |
         | Round Number | ❌ No | ✅ Yes (+15) | ✅ Yes (+15) |
-        | Policy Boosts | None | +15 pts | +25+20+15 = **+60 pts** |
-        | Expected Score | ~5–15% | ~25–45% | ~70–100% |
+        | Policy Boosts | None | +15 +15 = **+30 pts** | +25+20+15 = **+60 pts** |
+        | Expected Score | ~5–15% | ~40–55% | ~70–100% |
         """)
 
     # ── Apply presets into widget-state keys (only once, then clear) ─────────
@@ -193,12 +198,10 @@ if "analysis" not in st.session_state:
         col_cat, col_date = st.columns(2)
         with col_cat:
             _cat_keys = list(CAT_LABELS.keys())
-            _cat_idx  = _cat_keys.index(st.session_state["fx_cat"]) if st.session_state["fx_cat"] in _cat_keys else 0
             expcat_id = st.selectbox(
                 "Expense Category *",
                 options=_cat_keys,
                 format_func=lambda k: CAT_LABELS[k],
-                index=_cat_idx,
                 key="fx_cat",
             )
         with col_date:
@@ -218,11 +221,9 @@ if "analysis" not in st.session_state:
                 max_chars=200,
             )
         with col_pay:
-            _pay_idx = PAYMENT_METHODS.index(st.session_state["fx_pay"]) if st.session_state["fx_pay"] in PAYMENT_METHODS else 0
             payment_method = st.selectbox(
                 "Payment Method",
                 PAYMENT_METHODS,
-                index=_pay_idx,
                 key="fx_pay",
             )
 
@@ -230,12 +231,10 @@ if "analysis" not in st.session_state:
         col_dept, col_amt = st.columns(2)
         with col_dept:
             _dept_keys = list(DEPT_LABELS.keys())
-            _dept_idx  = _dept_keys.index(st.session_state["fx_dept"]) if st.session_state["fx_dept"] in _dept_keys else 0
             dept_id = st.selectbox(
                 "Department *",
                 options=_dept_keys,
                 format_func=lambda k: DEPT_LABELS[k],
-                index=_dept_idx,
                 key="fx_dept",
             )
         with col_amt:
@@ -286,9 +285,8 @@ if "analysis" not in st.session_state:
         # Feature engineering
         today               = date.today()
         submission_gap      = (today - purchase_date).days
-        is_weekend          = today.weekday() >= 5
         purchase_is_weekend = purchase_date.weekday() >= 5
-        is_round_number     = (total_amount % 100 == 0)
+        is_round_number     = (total_amount % 500 == 0)   # matches training (multiples of 500)
         is_affidavit        = int(not has_receipt)
 
         row = {
@@ -298,7 +296,7 @@ if "analysis" not in st.session_state:
             "IsAffidavit":        is_affidavit,
             "SubmissionGap":      submission_gap,
             "HasReceipt":         int(has_receipt),
-            "Is_Weekend":         int(is_weekend),
+            "Is_Weekend":         int(purchase_is_weekend),   # purchase date, consistent with training
             "Purchase_Is_Weekend": int(purchase_is_weekend),
             "Is_Round_Number":    int(is_round_number),
         }
@@ -329,7 +327,7 @@ if "analysis" not in st.session_state:
             "description":        description.strip() if description else "",
             "has_receipt":        has_receipt,
             "is_affidavit":       is_affidavit,
-            "is_weekend":         is_weekend,
+            "is_weekend":         purchase_is_weekend,
             "is_round_number":    is_round_number,
             "submission_gap":     submission_gap,
             "today":              today,
@@ -352,8 +350,19 @@ else:
     triage_color = a["triage_color"]
     risk_factors = a["risk_factors"]
 
-    st.markdown("---")
-    st.markdown("## 🤖 AI Risk Assessment Results")
+    st.markdown("""
+    <div style="height:1px; background:linear-gradient(90deg,transparent,#3b82f680,transparent);
+                margin:24px 0 20px;"></div>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;
+                animation:fadeInUp 0.4s cubic-bezier(.22,1,.36,1) both;">
+      <div style="width:42px; height:42px; border-radius:11px;
+                  background:linear-gradient(135deg,#6366f1,#818cf8);
+                  display:flex; align-items:center; justify-content:center;
+                  font-size:1.3rem; box-shadow:0 4px 14px rgba(99,102,241,0.35);">🤖</div>
+      <h2 style="margin:0; font-size:1.4rem; font-weight:800; letter-spacing:-0.02em;
+                 color:#f1f5f9;">AI Risk Assessment Results</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Compact form summary ──────────────────────────────────────────────────
     st.markdown(f"""
@@ -411,7 +420,7 @@ else:
     m2.metric(
         "ML Base Score",
         f"{raw_score:.1f}%",
-        help="Raw LightGBM model probability before policy boosts",
+        help="Raw XGBoost model probability before policy boosts",
     )
     m3.metric(
         "Policy Boost Total",
@@ -420,12 +429,14 @@ else:
     )
 
     # ── Triage banner ─────────────────────────────────────────────────────────
-    triage_icon = "🚨" if triage_label == "AUDIT FLAG" else "⚠️"
+    triage_icon = "🚨" if triage_label == "AUDIT FLAG" else "⚠️" if triage_label == "STANDARD REVIEW" else "✅"
     st.markdown(f"""
-    <div style="background:{triage_color}22; border:2px solid {triage_color};
-                border-radius:14px; padding:20px 28px; margin:16px 0;
-                display:flex; align-items:center; gap:18px;">
-        <div style="font-size:2.5rem;">{triage_icon}</div>
+    <div style="background:{triage_color}22; border:2px solid {triage_color}55;
+                border-radius:16px; padding:22px 28px; margin:16px 0;
+                display:flex; align-items:center; gap:18px;
+                box-shadow:0 0 28px {triage_color}22;
+                animation:fadeInUp 0.5s cubic-bezier(.22,1,.36,1) both;">
+        <div style="font-size:2.6rem; filter:drop-shadow(0 0 8px {triage_color}99);">{triage_icon}</div>
         <div>
             <div style="font-size:0.72rem; color:#94a3b8; text-transform:uppercase;
                         letter-spacing:0.08em;">Triage Level</div>
@@ -434,7 +445,8 @@ else:
             </div>
             <div style="color:#94a3b8; font-size:0.84rem; margin-top:2px;">
                 {"Full audit required — Finance Officer escalation." if triage_label == "AUDIT FLAG"
-                  else "Routed to standard Finance review queue."}
+                  else "Standard Finance review queue." if triage_label == "STANDARD REVIEW"
+                  else "No significant risk flags — normal processing."}
             </div>
         </div>
     </div>
@@ -446,16 +458,17 @@ else:
         boost_cols = st.columns(min(len(boosts), 4))
         for i, (label, pts) in enumerate(boosts):
             boost_cols[i % len(boost_cols)].markdown(f"""
-            <div style="background:#7c2d1233; border:1px solid #dc2626;
-                        border-radius:10px; padding:14px 16px; text-align:center;
-                        margin-bottom:8px;">
-                <div style="font-size:1.5rem; font-weight:800; color:#f87171;">
-                    +{pts} pts
-                </div>
+            <div style="background:linear-gradient(145deg,#450a0a44,#7c2d1222);
+                        border:1px solid #ef444455;
+                        border-radius:12px; padding:16px 14px; text-align:center;
+                        margin-bottom:8px; transition:transform .2s;
+                        box-shadow:0 2px 12px #ef444422;">
+                <div style="font-size:1.55rem; font-weight:800; color:#fca5a5;
+                            letter-spacing:-0.03em;">+{pts}</div>
+                <div style="font-size:0.65rem; color:#94a3b8; text-transform:uppercase;
+                            letter-spacing:0.08em; margin:2px 0;">pts</div>
                 <div style="font-size:0.78rem; color:#fca5a5; margin-top:6px;
-                            line-height:1.4;">
-                    {label}
-                </div>
+                            line-height:1.4;">{label}</div>
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -503,7 +516,7 @@ else:
     # ── How it works (collapsible) ────────────────────────────────────────────
     with st.expander("ℹ️ How does the AI scoring work?"):
         st.markdown(f"""
-**SmartSpend AI** uses a **LightGBM** gradient-boosting model trained on historical
+**SmartSpend AI** uses a **XGBoost** gradient-boosting model trained on historical
 expense data, combined with company policy rules.
 
 ##### Model Features (ranked by impact)
@@ -533,7 +546,8 @@ expense data, combined with company policy rules.
 ##### Triage Thresholds
 | Range | Level |
 |---|---|
-| < 70% | ⚠️ Standard Review |
+| < 40% | ✅ Low Risk |
+| 40–69% | ⚠️ Standard Review |
 | ≥ 70% | 🚨 Audit Flag |
 
 Per company policy, **no expenses are Auto-Approved**. All reports require human

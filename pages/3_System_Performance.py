@@ -30,13 +30,20 @@ render_user_sidebar()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
-  <span style="font-size:2rem;">📊</span>
-  <h2 style="margin:0; color:#f1f5f9;">System Performance & Model Accuracy</h2>
+<div style="display:flex; align-items:center; gap:14px; margin-bottom:6px;
+            animation:fadeInUp 0.45s cubic-bezier(.22,1,.36,1) both;">
+  <div style="width:48px; height:48px; border-radius:14px;
+              background:linear-gradient(135deg,#1d4ed8,#818cf8);
+              display:flex; align-items:center; justify-content:center;
+              font-size:1.5rem; box-shadow:0 4px 16px rgba(99,102,241,0.3);">📊</div>
+  <div>
+    <h2 style="margin:0; font-size:1.55rem; font-weight:800;
+               letter-spacing:-0.02em; color:#f1f5f9;">System Performance &amp; Model Accuracy</h2>
+    <p style="color:#64748b; margin:0; font-size:0.82rem;">
+      Model metrics, confusion matrix, feature importance &amp; business impact — computed on held-out test data.
+    </p>
+  </div>
 </div>
-<p style="color:#64748b; margin-top:0; margin-bottom:24px;">
-  Model metrics, confusion matrix, feature importance, and business impact — computed on held-out test data.
-</p>
 """, unsafe_allow_html=True)
 
 # ── Load metrics ──────────────────────────────────────────────────────────────
@@ -52,25 +59,32 @@ if not os.path.exists(metrics_path):
 with open(metrics_path) as f:
     m = json.load(f)
 
-lgbm_m = m["lgbm"]
+xgb_m  = m["xgb"]
 dt_m   = m["decision_tree"]
 shap_d = m["shap_importance"]
 biz    = m["business_impact"]
 
-# ── 1. Key Metrics (LightGBM) ─────────────────────────────────────────────────
-st.markdown("### 🏆 LightGBM — Key Performance Metrics")
+# ── 1. Key Metrics (XGBoost) ──────────────────────────────────────────────────
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;
+            animation:fadeInUp 0.4s cubic-bezier(.22,1,.36,1) both;">
+  <span style="background:linear-gradient(135deg,#b45309,#f59e0b); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#127942;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">XGBoost &mdash; Key Performance Metrics</span>
+</div>
+""", unsafe_allow_html=True)
 st.caption("Computed on held-out test data. Metrics are fixed until the model is retrained.")
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Accuracy",             f"{lgbm_m['accuracy']}%",
+k1.metric("Accuracy",             f"{xgb_m['accuracy']}%",
           help="Overall % of correct predictions across both classes.")
-k2.metric("Recall (Rejected)",    f"{lgbm_m['recall_rejected']}%",
+k2.metric("Recall (Rejected)",    f"{xgb_m['recall_rejected']}%",
           help="How many actual bad reports the model correctly caught. LOW = fraud slipping through.")
-k3.metric("Precision (Approved)", f"{lgbm_m['precision_approved']}%",
+k3.metric("Precision (Approved)", f"{xgb_m['precision_approved']}%",
           help="Confidence when the model says a report is normal.")
-k4.metric("F1-Score",             f"{lgbm_m['f1_score']}%",
+k4.metric("F1-Score",             f"{xgb_m['f1_score']}%",
           help="Balance between Precision and Recall.")
-k5.metric("AUC-ROC",              f"{lgbm_m['auc_roc']}%",
+k5.metric("AUC-ROC",              f"{xgb_m['auc_roc']}%",
           help="Model's ability to distinguish Approved vs Rejected across all thresholds.")
 
 st.info(
@@ -82,8 +96,14 @@ st.info(
 st.markdown("---")
 
 # ── 2. Confusion Matrix ───────────────────────────────────────────────────────
-st.markdown("### 🔢 Confusion Matrix — LightGBM")
-cm = lgbm_m["confusion_matrix"]
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
+  <span style="background:linear-gradient(135deg,#1d4ed8,#3b82f6); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128290;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Confusion Matrix &mdash; XGBoost</span>
+</div>
+""", unsafe_allow_html=True)
+cm = xgb_m["confusion_matrix"]
 
 cm_fig = go.Figure(data=go.Heatmap(
     z=[[cm["TN"], cm["FP"]], [cm["FN"], cm["TP"]]],
@@ -117,19 +137,25 @@ cr3.metric("⚠️ False Positives", cm["FP"], help="Good reports wrongly flagge
 cr4.metric("🚨 False Negatives", cm["FN"], help="Bad reports wrongly approved — financial loss risk")
 
 st.caption(
-    f"False Negative Rate: **{lgbm_m['false_negative_rate']}%** &nbsp;|&nbsp; "
-    f"False Positive Rate: **{lgbm_m['false_positive_rate']}%** &nbsp;·&nbsp; "
+    f"False Negative Rate: **{xgb_m['false_negative_rate']}%** &nbsp;|&nbsp; "
+    f"False Positive Rate: **{xgb_m['false_positive_rate']}%** &nbsp;·&nbsp; "
     "Minimising False Negatives is the primary objective."
 )
 
 st.markdown("---")
 
 # ── 3. Model Comparison ───────────────────────────────────────────────────────
-st.markdown("### ⚔️ Model Comparison — Decision Tree vs LightGBM")
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
+  <span style="background:linear-gradient(135deg,#9333ea,#c084fc); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#9876;&#65039;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Model Comparison &mdash; Decision Tree vs XGBoost</span>
+</div>
+""", unsafe_allow_html=True)
 
 metrics_labels = ["Accuracy", "Recall (Rejected)", "Precision (Approved)", "F1-Score", "AUC-ROC"]
-dt_vals   = [dt_m["accuracy"],   dt_m["recall_rejected"],   dt_m["precision_approved"],   dt_m["f1_score"],   dt_m["auc_roc"]]
-lgbm_vals = [lgbm_m["accuracy"], lgbm_m["recall_rejected"], lgbm_m["precision_approved"], lgbm_m["f1_score"], lgbm_m["auc_roc"]]
+dt_vals   = [dt_m["accuracy"],  dt_m["recall_rejected"],  dt_m["precision_approved"],  dt_m["f1_score"],  dt_m["auc_roc"]]
+xgb_vals  = [xgb_m["accuracy"], xgb_m["recall_rejected"], xgb_m["precision_approved"], xgb_m["f1_score"], xgb_m["auc_roc"]]
 
 comp_fig = go.Figure()
 comp_fig.add_trace(go.Bar(
@@ -137,8 +163,8 @@ comp_fig.add_trace(go.Bar(
     marker_color="#f59e0b", text=[f"{v}%" for v in dt_vals], textposition="outside",
 ))
 comp_fig.add_trace(go.Bar(
-    name="LightGBM", x=metrics_labels, y=lgbm_vals,
-    marker_color="#2563eb", text=[f"{v}%" for v in lgbm_vals], textposition="outside",
+    name="XGBoost", x=metrics_labels, y=xgb_vals,
+    marker_color="#2563eb", text=[f"{v}%" for v in xgb_vals], textposition="outside",
 ))
 comp_fig.update_layout(
     barmode="group",
@@ -155,65 +181,71 @@ st.plotly_chart(comp_fig, use_container_width=True)
 comp_data = {
     "Metric":        metrics_labels,
     "Decision Tree": [f"{v}%" for v in dt_vals],
-    "LightGBM":      [f"{v}%" for v in lgbm_vals],
-    "Winner":        ["🏆 " + ("LightGBM" if l > d else "Decision Tree")
-                      for d, l in zip(dt_vals, lgbm_vals)],
+    "XGBoost":       [f"{v}%" for v in xgb_vals],
+    "Winner":        ["🏆 " + ("XGBoost" if x > d else "Decision Tree")
+                      for d, x in zip(dt_vals, xgb_vals)],
 }
 st.dataframe(pd.DataFrame(comp_data).set_index("Metric"), use_container_width=True)
 
-# ── Why LightGBM ──────────────────────────────────────────────────────────────
+# ── Why XGBoost ───────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
-st.markdown("#### 🏅 Why LightGBM is the Right Model — Despite the Numbers")
+st.markdown("#### 🏅 Why XGBoost is the Right Model — Despite the Numbers")
 
-lgbm_auc = lgbm_m["auc_roc"]
-dt_auc   = dt_m["auc_roc"]
-lgbm_fpr = lgbm_m["false_positive_rate"]
-dt_fpr   = dt_m["false_positive_rate"]
+xgb_auc = xgb_m["auc_roc"]
+dt_auc  = dt_m["auc_roc"]
+xgb_rec = xgb_m["recall_rejected"]
+dt_rec  = dt_m["recall_rejected"]
 
 st.markdown(f"""
-At first glance, the Decision Tree wins **4 out of 5 metrics**.
-But raw metric counts don't tell the full story — what matters is *which* metric matters most.
+At first glance several raw metrics look close — but what matters is *which* metric matters most.
 
 ---
 
-**1. AUC-ROC is the decisive metric — and LightGBM wins it ({lgbm_auc}% vs {dt_auc}%)**
+**1. AUC-ROC is the decisive metric — and XGBoost wins it ({xgb_auc}% vs {dt_auc}%)**
 
 SmartSpend AI outputs a **continuous risk score (0–100%)** used to route expenses into triage tiers
 and apply business-rule boosts. AUC-ROC is the only metric that evaluates this — it measures how
 well the model separates Approved from Rejected expenses *across every possible threshold*.
-LightGBM's {lgbm_auc}% AUC-ROC produces more reliable, well-calibrated risk scores at all confidence levels.
+XGBoost's {xgb_auc}% AUC-ROC produces more reliable, well-calibrated risk scores at all confidence levels.
 
 ---
 
-**2. Fewer false alarms — lower False Positive Rate ({lgbm_fpr}% vs {dt_fpr}%)**
+**2. Recall is the most business-critical metric — and XGBoost wins it ({xgb_rec}% vs {dt_rec}%)**
 
-The Decision Tree flags **{dt_fpr}% of good reports** as anomalous. LightGBM only flags **{lgbm_fpr}%** —
-that's **{round(dt_fpr - lgbm_fpr, 2)} percentage points fewer** good reports wrongly sent to Finance review,
-directly reducing officer workload and employee friction.
+SmartSpend's primary goal is to **catch fraudulent and non-compliant reports before reimbursement**.
+XGBoost correctly flags **{xgb_rec}% of actual bad reports**, while the Decision Tree catches only **{dt_rec}%** —
+missing {round(xgb_rec - dt_rec, 1)} percentage points more fraud. Every missed bad report is a direct financial loss.
 
 ---
 
-**3. Native categorical data handling**
+**3. Consistent pre-processing via StandardScaler pipeline**
 
-The dataset's most predictive features (`Dept_ID`, `ExpCat_ID`, `IsAffidavit`, `Is_Weekend`) are categorical.
-LightGBM accepts Pandas `category` dtype directly. The Decision Tree required manual `cat.codes` encoding —
-a transformation that loses ordinal meaning and can negatively affect generalization on new category combinations.
+Both models use an identical `StandardScaler → Classifier` sklearn pipeline, ensuring a **fair,
+standardised comparison** on the same normalised feature space. The scaler is baked into the
+saved `.pkl` so inference at runtime is automatic — no manual feature scaling needed.
 
 ---
 
 **4. Real-world generalization as data grows**
 
-The Decision Tree performs well on this clean synthetic data. In a live production environment with noisy,
-messy data, LightGBM's ensemble of corrective trees generalizes more robustly and scales to millions of records.
+In a live production environment with noisy, messy data, XGBoost's gradient-boosted ensemble
+generalizes more robustly, handles overfitting via built-in regularisation (`reg_alpha`, `reg_lambda`),
+and scales to millions of records.
 
-> **Conclusion:** Decision Tree is a useful baseline. But for a production risk-scoring system dependent on
-> calibrated probability outputs — **LightGBM is definitively the correct choice for SmartSpend AI.**
+> **Conclusion:** Decision Tree is a useful baseline. But for a production risk-scoring system where
+> **catching every bad report matters most** — **XGBoost is definitively the correct choice for SmartSpend AI.**
 """)
 
 st.markdown("---")
 
 # ── 4. SHAP Feature Importance ────────────────────────────────────────────────
-st.markdown("### 🔍 SHAP Feature Importance — LightGBM")
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
+  <span style="background:linear-gradient(135deg,#0e7490,#22d3ee); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128269;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">SHAP Feature Importance &mdash; XGBoost</span>
+</div>
+""", unsafe_allow_html=True)
 st.caption(
     "SHAP (SHapley Additive exPlanations) shows which features most influence predictions. "
     "Higher = greater impact on the model's output."
@@ -251,7 +283,13 @@ st.caption(
 st.markdown("---")
 
 # ── 5. Business Impact ────────────────────────────────────────────────────────
-st.markdown("### 💼 Business Impact Validation")
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
+  <span style="background:linear-gradient(135deg,#15803d,#22c55e); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128188;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Business Impact Validation</span>
+</div>
+""", unsafe_allow_html=True)
 st.caption(f"Based on {biz['total_test_records']} held-out test records.")
 
 b1, b2, b3, b4 = st.columns(4)
@@ -275,7 +313,13 @@ st.markdown(f"""
 st.markdown("---")
 
 # ── 6. Live Data Trends ────────────────────────────────────────────────────────
-st.markdown("### 📈 Live Data Trends")
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;">
+  <span style="background:linear-gradient(135deg,#7c3aed,#a78bfa); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128200;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Live Data Trends</span>
+</div>
+""", unsafe_allow_html=True)
 st.caption("Real-time charts pulled from SmartSpendDB — auto-refreshes on page reload.")
 
 # dept name/budget maps kept as fallbacks only (DB already returns these)

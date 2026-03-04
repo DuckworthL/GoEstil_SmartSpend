@@ -40,14 +40,34 @@ if not st.session_state.get("logged_in"):
     _, center, _ = st.columns([1.4, 2, 1.4])
     with center:
         st.markdown("""
-        <div style="text-align:center; padding:48px 0 36px 0;">
-            <div style="font-size:3.2rem; margin-bottom:10px;">💳</div>
-            <h1 style="font-size:2.2rem; font-weight:800; color:#f1f5f9; margin:0;">
+        <style>
+        /* Login page extras */
+        .login-hero { animation: fadeInUp 0.6s cubic-bezier(.22,1,.36,1) both; }
+        .login-card {
+            background: rgba(17,24,39,0.9);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(45,73,122,0.5);
+            border-radius: 20px;
+            padding: 36px 32px;
+            box-shadow: 0 8px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.06);
+            animation: fadeInUp 0.55s cubic-bezier(.22,1,.36,1) 0.1s both;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="login-hero" style="text-align:center; padding:48px 0 28px 0;">
+            <div style="font-size:3.4rem; margin-bottom:10px;
+                        filter:drop-shadow(0 0 20px rgba(59,130,246,0.4));">💳</div>
+            <h1 style="font-size:2.3rem; font-weight:900; margin:0;
+                       background:linear-gradient(135deg,#f1f5f9 30%,#3b82f6);
+                       -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+                       background-clip:text;">
                 SmartSpend AI
             </h1>
-            <p style="color:#64748b; font-size:0.9rem; margin-top:10px; line-height:1.6;">
+            <p style="color:#64748b; font-size:0.92rem; margin-top:10px; line-height:1.7;">
                 Intelligent expense anomaly detection<br>
-                Sign in to continue
+                <span style='color:#3b82f6; font-weight:600;'>Sign in to continue</span>
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -130,28 +150,53 @@ r_color = _ROLE_BADGE.get(role, "#64748b")
 
 # ── Hero header ───────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div style="text-align:center; padding:40px 0 28px 0;">
-    <div style="font-size:3.4rem; margin-bottom:10px;">💳</div>
-    <h1 style="font-size:2.5rem; font-weight:800; color:#f1f5f9; margin:0;">
+<style>
+.hero-section {{ animation: fadeInUp 0.5s cubic-bezier(.22,1,.36,1) both; }}
+.nav-card {{
+    background: linear-gradient(145deg, #141a26 0%, #1a2235 100%);
+    border: 1px solid rgba(45,73,122,0.6);
+    border-radius: 18px;
+    padding: 32px 24px;
+    text-align: center;
+    min-height: 180px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.22s;
+    cursor: pointer;
+    animation: fadeInUp 0.45s ease both;
+}}
+.nav-card:hover {{
+    border-color: rgba(59,130,246,0.55);
+    box-shadow: 0 8px 36px rgba(59,130,246,0.16), inset 0 0 0 1px rgba(59,130,246,0.08);
+    transform: translateY(-5px);
+}}
+.nav-card-icon {{ font-size: 2.4rem; filter: drop-shadow(0 0 10px rgba(59,130,246,0.3)); }}
+.nav-card-title {{ font-size: 1.02rem; font-weight: 800; color: #f1f5f9; }}
+.nav-card-desc  {{ font-size: 0.78rem; color: #64748b; line-height: 1.6; }}
+</style>
+<div class="hero-section" style="text-align:center; padding:44px 0 30px 0;">
+    <div style="font-size:3.6rem; margin-bottom:12px;
+                filter:drop-shadow(0 0 24px rgba(59,130,246,0.35));">💳</div>
+    <h1 style="font-size:2.6rem; font-weight:900; margin:0;
+               background:linear-gradient(135deg,#f1f5f9 30%,#60a5fa 70%,#818cf8);
+               -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+               background-clip:text; letter-spacing:-0.03em;">
         SmartSpend AI
     </h1>
-    <p style="color:#64748b; font-size:1rem; margin-top:10px;">
+    <p style="color:#64748b; font-size:1rem; margin-top:12px;">
         Welcome back, <b style="color:#f1f5f9;">{full_name}</b>
         &nbsp;·&nbsp;
-        <span style="color:{r_color}; font-weight:600;">{r_icon} {role}</span>
+        <span style="color:{r_color}; font-weight:700;">{r_icon} {role}</span>
     </p>
 </div>
 """, unsafe_allow_html=True)
 
 # ── Navigation cards ──────────────────────────────────────────────────────────
 _CARD = """
-<div style="background:#1a1f2e; border:1px solid #2d3561; border-radius:14px;
-            padding:28px 20px; text-align:center; min-height:175px;
-            display:flex; flex-direction:column;
-            align-items:center; justify-content:center; gap:8px;">
-    <div style="font-size:2.2rem;">{icon}</div>
-    <div style="font-size:1rem; font-weight:700; color:#f1f5f9;">{title}</div>
-    <div style="font-size:0.78rem; color:#64748b; line-height:1.55;">{desc}</div>
+<div class="nav-card" style="animation-delay:{delay}s">
+    <div class="nav-card-icon">{icon}</div>
+    <div class="nav-card-title">{title}</div>
+    <div class="nav-card-desc">{desc}</div>
 </div>
 """
 
@@ -159,18 +204,18 @@ CARDS = [
     ("📋", "Submit Expense",
      "Fill in your expense details. The AI analyses risk before you save."),
     ("📁", "Reports Log",
-     "View all reports. Managers review AI risk and approve or reject. "
+     "View all reports. Managers approve or reject. "
      "Finance Officers process reimbursements."),
     ("📊", "System Performance",
      "Model accuracy, confusion matrix, SHAP feature importance, and business impact."),
 ]
 
 c1, c2, c3 = st.columns(3, gap="large")
-for col, (icon, title, desc) in zip([c1, c2, c3], CARDS):
-    col.markdown(_CARD.format(icon=icon, title=title, desc=desc), unsafe_allow_html=True)
+for col, (delay, (icon, title, desc)) in zip([c1, c2, c3], enumerate(CARDS)):
+    col.markdown(_CARD.format(icon=icon, title=title, desc=desc, delay=delay*0.08), unsafe_allow_html=True)
 
 st.markdown(
-    "<p style='text-align:center; color:#334155; font-size:0.8rem; margin-top:8px;'>"
+    "<p style='text-align:center; color:#1e2d45; font-size:0.8rem; margin-top:8px;'>"
     "← Use the sidebar to navigate between pages"
     "</p>",
     unsafe_allow_html=True,
@@ -183,11 +228,11 @@ metrics_path = os.path.join(os.path.dirname(__file__), "model_metrics.json")
 if os.path.exists(metrics_path):
     with open(metrics_path) as f:
         mx = json.load(f)
-    lgbm = mx["lgbm"]
+    lgbm = mx["xgb"]
 
     st.markdown("### 🏆 Model at a Glance")
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Model",               "LightGBM")
+    m1.metric("Model",               "XGBoost")
     m2.metric("Accuracy",            f"{lgbm['accuracy']}%")
     m3.metric("AUC-ROC",             f"{lgbm['auc_roc']}%")
     m4.metric("Recall (Flagged)",    f"{lgbm['recall_rejected']}%")
