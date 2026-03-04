@@ -52,9 +52,6 @@ LARGE_AMOUNT_AUDIT    = 100_000.0  # ₱ — mandatory audit flag
 ML_ANOMALY_THRESHOLD  = 40.0       # raw ML % at which model considers record anomalous
 ML_ANOMALY_BOOST      = 30.0       # pts added to final score to bridge ML flag → UI triage
 
-# ── Feature columns expected by the model ────────────────────────────────────
-CAT_COLS = ["Dept_ID", "ExpCat_ID", "IsAffidavit", "Is_Weekend", "Is_Round_Number"]
-
 # ── Report lifecycle status config ────────────────────────────────────────────
 # Each status maps to (display_label, hex_colour, emoji)
 STATUS_CONFIG: dict[str, tuple[str, str, str]] = {

@@ -228,15 +228,15 @@ metrics_path = os.path.join(os.path.dirname(__file__), "model_metrics.json")
 if os.path.exists(metrics_path):
     with open(metrics_path) as f:
         mx = json.load(f)
-    lgbm = mx["xgb"]
+    xgb_m = mx["xgb"]
 
     st.markdown("### 🏆 Model at a Glance")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Model",               "XGBoost")
-    m2.metric("Accuracy",            f"{lgbm['accuracy']}%")
-    m3.metric("AUC-ROC",             f"{lgbm['auc_roc']}%")
-    m4.metric("Recall (Flagged)",    f"{lgbm['recall_rejected']}%")
-    m5.metric("False Positive Rate", f"{lgbm['false_positive_rate']}%")
+    m2.metric("Accuracy",            f"{xgb_m['accuracy']}%")
+    m3.metric("AUC-ROC",             f"{xgb_m['auc_roc']}%")
+    m4.metric("Recall (Flagged)",    f"{xgb_m['recall_rejected']}%")
+    m5.metric("False Positive Rate", f"{xgb_m['false_positive_rate']}%")
 
     st.caption(
         "Model trained on synthetic SmartSpend expense data. "

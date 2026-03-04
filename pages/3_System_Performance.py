@@ -218,10 +218,10 @@ missing {round(xgb_rec - dt_rec, 1)} percentage points more fraud. Every missed 
 
 ---
 
-**3. Consistent pre-processing via StandardScaler pipeline**
+**3. Consistent pre-processing via ColumnTransformer + RobustScaler pipeline**
 
-Both models use an identical `StandardScaler → Classifier` sklearn pipeline, ensuring a **fair,
-standardised comparison** on the same normalised feature space. The scaler is baked into the
+Both models use an identical `ColumnTransformer(RobustScaler → Classifier)` sklearn pipeline, ensuring a **fair,
+standardised comparison** on the same normalised feature space. The preprocessor is baked into the
 saved `.pkl` so inference at runtime is automatic — no manual feature scaling needed.
 
 ---
