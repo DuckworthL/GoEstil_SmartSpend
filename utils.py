@@ -3,6 +3,7 @@ utils.py — SmartSpend AI shared constants, helpers, and CSS
 Imported by all pages.
 """
 
+import math
 import joblib
 import pandas as pd
 
@@ -224,21 +225,57 @@ def predict_risk(row: dict) -> tuple[float, float, list[tuple[str, int]]]:
     """
     Run model + business rules on a feature dict.
     Returns (raw_ml_score_pct, final_score_pct, boosts).
-    """
-    model = load_model()
 
+    The pipeline is: ColumnTransformer(RobustScaler on numeric, passthrough on
+    binary/categorical) → XGBClassifier.  Engineered features must be computed
+    here in exactly the same way as in train_model.py so inference is consistent
+    with training.
+    """
+    model    = load_model()
+    amount   = float(row["Exp_TotalAmount"])
+    gap      = float(row["SubmissionGap"])
+    is_aff   = float(row["IsAffidavit"])
+
+    # ── Engineered features (must mirror train_model.py exactly) ──────────────
+    # Log-transform: compresses ₱100–₱250k skew so RobustScaler centres well.
+    log_amount = math.log1p(amount)
+
+    # Gap ratio: gap relative to the 60-day policy window (0 = same-day, 1 = at limit).
+    gap_ratio = gap / 60.0
+
+    # Interaction: large amount + no receipt — strongest single audit signal.
+    high_amt_no_rcpt = float(amount > 10_000 and is_aff == 0)
+
+    # Ordinal tier: lets the model learn tier-specific patterns instead of
+    # discovering all breakpoints from the raw (or log) amount alone.
+    amount_tier = float(
+        4 if amount >= 100_000 else
+        3 if amount >= 50_000  else
+        2 if amount >= 5_000   else
+        1 if amount >= 1_000   else 0
+    )
+
+    # Interaction: same-day submission + no receipt — backdating red flag.
+    same_day_no_rcpt = float(gap == 0 and is_aff == 0)
+
+    # ── Build inference DataFrame (column names must match ColumnTransformer) ─
     df = pd.DataFrame([{
-        "Exp_TotalAmount":  float(row["Exp_TotalAmount"]),
-        "IsAffidavit":      float(row["IsAffidavit"]),
-        "ExpCat_ID":        float(row["ExpCat_ID"]),
-        "Dept_ID":          float(row["Dept_ID"]),
-        "Submission_Gap":   float(row["SubmissionGap"]),
-        "Is_Weekend":       float(row.get("Is_Weekend", 0)),
-        "Is_Round_Number":  float(row.get("Is_Round_Number", 0)),
+        # Numeric — RobustScaler applied by pipeline
+        "Log_Amount":        log_amount,
+        "Submission_Gap":    gap,
+        "Gap_Ratio":         gap_ratio,
+        # Passthrough — no scaling
+        "IsAffidavit":       is_aff,
+        "ExpCat_ID":         float(row["ExpCat_ID"]),
+        "Dept_ID":           float(row["Dept_ID"]),
+        "Is_Weekend":        float(row.get("Is_Weekend", 0)),
+        "Is_Round_Number":   float(row.get("Is_Round_Number", 0)),
+        "HighAmt_NoReceipt": high_amt_no_rcpt,
+        "Amount_Tier":       amount_tier,
+        "SameDay_NoReceipt": same_day_no_rcpt,
     }])
 
-    # Pipeline (StandardScaler + XGBClassifier) handles scaling internally
-    raw_prob   = float(model.predict_proba(df)[0][1]) * 100.0
+    raw_prob = float(model.predict_proba(df)[0][1]) * 100.0
     final, boosts = apply_business_rules(raw_prob, row)
     return raw_prob, final, boosts
 

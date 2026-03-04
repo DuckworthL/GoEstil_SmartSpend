@@ -6,11 +6,16 @@ import shap
 from xgboost import XGBClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import (
+    StandardScaler, RobustScaler, MinMaxScaler,
+    PowerTransformer, QuantileTransformer,
+)
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.metrics import (
     accuracy_score, recall_score, precision_score,
-    f1_score, roc_auc_score, confusion_matrix, classification_report
+    f1_score, roc_auc_score, confusion_matrix,
+    classification_report, precision_recall_curve,
 )
 
 # ── 1. Generate synthetic training data ───────────────────────────────────────
@@ -111,14 +116,57 @@ df = pd.DataFrame({
 
 print(f"Dataset: {N} rows | Flagged: {labels.sum()} ({labels.mean()*100:.1f}%)")
 
+# ── 3b. Feature engineering ───────────────────────────────────────────────────
+# Log-transform amount: compresses the ₱100–₱250k range into a roughly
+# Gaussian distribution — RobustScaler then centres this well and prevents
+# extreme amounts from dominating the scaler's IQR reference.
+df["Log_Amount"] = np.log1p(df["Exp_TotalAmount"])
+
+# Interaction: large amount AND no receipt — the single strongest audit signal.
+# A tree split on the raw features can find this, but giving it explicitly
+# lets shallower trees (max_depth=6) surface it in the first levels.
+df["HighAmt_NoReceipt"] = ((df["Exp_TotalAmount"] > 10_000) & (df["IsAffidavit"] == 0)).astype(int)
+
+# Ordinal amount tier — lets the model learn tier-specific patterns without
+# having to discover all the breakpoints itself from raw amounts.
+df["Amount_Tier"] = np.digitize(
+    df["Exp_TotalAmount"],
+    bins=[1_000, 5_000, 50_000, 100_000],
+).astype(int)  # 0=<1k, 1=1k-5k, 2=5k-50k, 3=50k-100k, 4=100k+
+
+# Interaction: same-day submission AND no receipt — strongest backdating signal.
+df["SameDay_NoReceipt"] = ((df["Submission_Gap"] == 0) & (df["IsAffidavit"] == 0)).astype(int)
+
+# Gap ratio: submission gap normalised to the 60-day policy window.
+# Provides a linear view of urgency/lateness alongside raw gap days.
+df["Gap_Ratio"] = df["Submission_Gap"] / 60.0
+
 # ── 4. Features / target ──────────────────────────────────────────────────────
-FEATURE_COLS = [
-    "Exp_TotalAmount", "IsAffidavit", "ExpCat_ID", "Dept_ID",
-    "Submission_Gap", "Is_Weekend", "Is_Round_Number",
+# Numeric features — these have wide or skewed ranges and benefit from
+# RobustScaler (uses median/IQR, so outlier amounts don't distort scaling).
+NUMERIC_FEATURES = [
+    "Log_Amount",      # log-compressed amount (handles ₱100–₱250k skew)
+    "Submission_Gap",  # days 0–60+  (wide range, right-skewed)
+    "Gap_Ratio",       # Submission_Gap / 60 (0–1+ normalised linear view)
 ]
 
-# Both pipelines use StandardScaler — keep all features as float
-X = df[FEATURE_COLS].copy().astype(float)
+# Passthrough features — binary flags and low-cardinality integers.
+# XGBoost tree splits don't need these scaled; scaling binary {0,1} columns
+# would just add noise, not signal.
+PASSTHROUGH_FEATURES = [
+    "IsAffidavit",      # binary: 0=receipt, 1=affidavit
+    "ExpCat_ID",        # 1–8 category ID
+    "Dept_ID",          # 101–105 dept ID
+    "Is_Weekend",       # binary: purchase on weekend
+    "Is_Round_Number",  # binary: amount multiple of ₱500
+    "HighAmt_NoReceipt",# interaction: high amount + no receipt
+    "Amount_Tier",      # ordinal 0–4 tier
+    "SameDay_NoReceipt",# interaction: gap=0 + no receipt
+]
+
+ALL_FEATURE_COLS = NUMERIC_FEATURES + PASSTHROUGH_FEATURES  # 11 total
+
+X = df[ALL_FEATURE_COLS].copy().astype(float)
 y = df["Label"]
 
 # ── 5. Train / test split ─────────────────────────────────────────────────────
@@ -126,30 +174,137 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# ── 6. Train XGBoost — Pipeline: StandardScaler → XGBClassifier ──────────────
+# ── 6. Build ColumnTransformer preprocessor ──────────────────────────────────
+# Why ColumnTransformer over a global scaler?
+#   • Numeric columns (Log_Amount, Submission_Gap, Gap_Ratio) have very
+#     different scales and right-skewed distributions.  RobustScaler uses
+#     median + IQR, so extreme expense amounts (₱250k outliers) don't pull
+#     the scaler parameters like StandardScaler's mean/std would.
+#   • Binary / low-cardinality columns (IsAffidavit, ExpCat_ID, etc.) carry
+#     no benefit from scaling — scaling {0,1} flags to [-1, +1] just adds
+#     floating-point noise to tree split thresholds.
+#   • Keeping them separate makes each column's preprocessing intent explicit
+#     and easy to swap per-column later.
 neg_count = (y_train == 0).sum()
 pos_count = (y_train == 1).sum()
 imbalance_ratio = neg_count / pos_count
 print(f"Class imbalance ratio (scale_pos_weight): {imbalance_ratio:.2f}")
 
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num",  RobustScaler(), NUMERIC_FEATURES),
+        ("pass", "passthrough",  PASSTHROUGH_FEATURES),
+    ],
+    remainder="drop",
+)
+
+# ── 7. Train XGBoost — Pipeline: ColumnTransformer → XGBClassifier ───────────
 xgb_pipeline = Pipeline([
-    ("scaler", StandardScaler()),
-    ("xgb",    XGBClassifier(
+    ("preprocess", preprocessor),
+    ("xgb",        XGBClassifier(
         n_estimators=300, learning_rate=0.05, max_depth=6,
         scale_pos_weight=imbalance_ratio,
+        subsample=0.85,          # row-sampling: reduces overfitting, adds diversity
+        colsample_bytree=0.85,   # feature-sampling per tree: same benefit
+        min_child_weight=3,      # min samples per leaf: guards against tiny noisy splits
+        gamma=0.1,               # min loss reduction to split: light regularisation
         random_state=42, eval_metric="logloss", verbosity=0,
     )),
 ])
 xgb_pipeline.fit(X_train, y_train)
 
-# ── 7. Train Decision Tree — Pipeline: StandardScaler → DecisionTreeClassifier ─
+# ── 8. Train Decision Tree — Pipeline: ColumnTransformer → DecisionTreeClassifier
+# Decision Tree shares the same preprocessor so the comparison is apples-to-apples.
+dt_preprocessor = ColumnTransformer(
+    transformers=[
+        ("num",  RobustScaler(), NUMERIC_FEATURES),
+        ("pass", "passthrough",  PASSTHROUGH_FEATURES),
+    ],
+    remainder="drop",
+)
 dt_pipeline = Pipeline([
-    ("scaler", StandardScaler()),
-    ("dt",     DecisionTreeClassifier(max_depth=6, random_state=42)),
+    ("preprocess", dt_preprocessor),
+    ("dt",          DecisionTreeClassifier(max_depth=6, random_state=42)),
 ])
 dt_pipeline.fit(X_train, y_train)
 
-# ── 8. Helper: compute all metrics ───────────────────────────────────────────
+# ── 8b. Scaler benchmark ──────────────────────────────────────────────────────
+# Compare five scaler strategies on the numeric features only.
+# This helps verify that RobustScaler is the best choice for this dataset.
+print("\n── Scaler Benchmark (XGBoost, numeric features only) ──")
+scalers_to_test = {
+    "StandardScaler":   StandardScaler(),
+    "RobustScaler":     RobustScaler(),
+    "MinMaxScaler":     MinMaxScaler(),
+    "PowerTransformer": PowerTransformer(method="yeo-johnson"),
+    "QuantileNormal":   QuantileTransformer(output_distribution="normal", random_state=42),
+    "NoScaler":         "passthrough",
+}
+benchmark_results = {}
+for scaler_name, scaler_obj in scalers_to_test.items():
+    bench_pre = ColumnTransformer(
+        transformers=[
+            ("num",  scaler_obj,    NUMERIC_FEATURES),
+            ("pass", "passthrough", PASSTHROUGH_FEATURES),
+        ],
+        remainder="drop",
+    )
+    bench_pipe = Pipeline([
+        ("preprocess", bench_pre),
+        ("xgb",        XGBClassifier(
+            n_estimators=300, learning_rate=0.05, max_depth=6,
+            scale_pos_weight=imbalance_ratio, subsample=0.85,
+            colsample_bytree=0.85, min_child_weight=3, gamma=0.1,
+            random_state=42, eval_metric="logloss", verbosity=0,
+        )),
+    ])
+    bench_pipe.fit(X_train, y_train)
+    y_p  = bench_pipe.predict_proba(X_test)[:, 1]
+    auc  = round(roc_auc_score(y_test, y_p) * 100, 2)
+    rec  = round(recall_score(y_test, (y_p >= 0.40).astype(int)) * 100, 2)
+    benchmark_results[scaler_name] = {"auc_roc": auc, "recall": rec}
+    print(f"  {scaler_name:22s} → AUC-ROC: {auc:6.2f}%   Recall: {rec:5.1f}%")
+
+# ── 8c. Stratified K-Fold cross-validation ────────────────────────────────────
+# A single 80/20 split can be lucky or unlucky.  5-fold stratified CV gives a
+# ±std band showing how stable the model is across different data subsets.
+print("\n── 5-Fold Stratified Cross-Validation ──")
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+cv_auc_scores = cross_val_score(
+    xgb_pipeline, X, y,
+    cv=cv, scoring="roc_auc", n_jobs=-1,
+)
+cv_rec_scores = cross_val_score(
+    xgb_pipeline, X, y,
+    cv=cv, scoring="recall", n_jobs=-1,
+)
+print(f"  AUC-ROC : {cv_auc_scores.mean()*100:.2f}% ± {cv_auc_scores.std()*100:.2f}%")
+print(f"  Recall  : {cv_rec_scores.mean()*100:.2f}% ± {cv_rec_scores.std()*100:.2f}%")
+cv_summary = {
+    "auc_roc_mean": round(float(cv_auc_scores.mean() * 100), 2),
+    "auc_roc_std":  round(float(cv_auc_scores.std()  * 100), 2),
+    "recall_mean":  round(float(cv_rec_scores.mean() * 100), 2),
+    "recall_std":   round(float(cv_rec_scores.std()  * 100), 2),
+}
+
+# ── 8d. Find optimal classification threshold from Precision-Recall curve ────
+# The default threshold of 0.40 was chosen manually.  The PR curve finds the
+# threshold with the highest F1 — useful for imbalanced anomaly detection where
+# Recall matters more than Precision.
+y_proba_train_test = xgb_pipeline.predict_proba(X_test)[:, 1]
+precision_vals, recall_vals, pr_thresholds = precision_recall_curve(y_test, y_proba_train_test)
+f1_vals = np.where(
+    (precision_vals + recall_vals) > 0,
+    2 * (precision_vals * recall_vals) / (precision_vals + recall_vals),
+    0.0,
+)
+best_f1_idx    = f1_vals[:-1].argmax()   # last element has no corresponding threshold
+optimal_thresh = float(pr_thresholds[best_f1_idx])
+print(f"\n── Threshold Analysis ──")
+print(f"  Default  threshold (0.40) → F1: {f1_vals[np.searchsorted(pr_thresholds, 0.40, side='left')]:.3f}")
+print(f"  Optimal  threshold ({optimal_thresh:.3f})  → F1: {f1_vals[best_f1_idx]:.3f}")
+
+# ── 9. Helper: compute all metrics ───────────────────────────────────────────
 def compute_metrics(pipeline, X_t, y_t, model_name, threshold=0.40):
     y_proba = pipeline.predict_proba(X_t)[:, 1]
     y_pred  = (y_proba >= threshold).astype(int)
@@ -173,17 +328,21 @@ def compute_metrics(pipeline, X_t, y_t, model_name, threshold=0.40):
 xgb_metrics = compute_metrics(xgb_pipeline, X_test, y_test, "XGBoost")
 dt_metrics  = compute_metrics(dt_pipeline,  X_test, y_test, "Decision Tree")
 
-print("\n── XGBoost ──")
-print(classification_report(y_test, xgb_pipeline.predict(X_test), target_names=["Normal (0)", "Flagged (1)"]))
+print("\n── XGBoost (default threshold 0.40) ──")
+print(classification_report(y_test, (xgb_pipeline.predict_proba(X_test)[:, 1] >= 0.40).astype(int), target_names=["Normal (0)", "Flagged (1)"]))
+print(f"── XGBoost (optimal threshold {optimal_thresh:.3f}) ──")
+print(classification_report(y_test, (xgb_pipeline.predict_proba(X_test)[:, 1] >= optimal_thresh).astype(int), target_names=["Normal (0)", "Flagged (1)"]))
 print("\n── Decision Tree ──")
-print(classification_report(y_test, dt_pipeline.predict(X_test), target_names=["Normal (0)", "Flagged (1)"]))
+print(classification_report(y_test, (dt_pipeline.predict_proba(X_test)[:, 1] >= 0.40).astype(int), target_names=["Normal (0)", "Flagged (1)"]))
 
-# ── 9. SHAP values for XGBoost ───────────────────────────────────────────────
+# ── 10. SHAP values for XGBoost ──────────────────────────────────────────────
 print("Computing SHAP values...")
-# Extract scaled test data and the underlying XGB estimator from the pipeline
-X_test_scaled = xgb_pipeline.named_steps["scaler"].transform(X_test)
-explainer     = shap.TreeExplainer(xgb_pipeline.named_steps["xgb"])
-shap_values   = explainer.shap_values(X_test_scaled)
+# The ColumnTransformer outputs numeric-scaled columns first, then passthrough.
+# The XGB estimator inside the pipeline sees this transformed feature matrix,
+# so we pass the transformed data to TreeExplainer — not the raw X_test.
+X_test_transformed = xgb_pipeline.named_steps["preprocess"].transform(X_test)
+explainer          = shap.TreeExplainer(xgb_pipeline.named_steps["xgb"])
+shap_values        = explainer.shap_values(X_test_transformed)
 
 # For binary classification shap_values may be a list [class0, class1]
 if isinstance(shap_values, list):
@@ -192,12 +351,14 @@ else:
     sv = shap_values
 
 mean_shap = np.abs(sv).mean(axis=0)
+# Feature name order after ColumnTransformer: numeric first, then passthrough
+shap_feature_names = ALL_FEATURE_COLS  # NUMERIC_FEATURES + PASSTHROUGH_FEATURES
 shap_importance = {
     feat: round(float(val), 4)
-    for feat, val in sorted(zip(FEATURE_COLS, mean_shap), key=lambda x: -x[1])
+    for feat, val in sorted(zip(shap_feature_names, mean_shap), key=lambda x: -x[1])
 }
 
-# ── 10. Business impact estimates ─────────────────────────────────────────────
+# ── 11. Business impact estimates ────────────────────────────────────────────
 total            = len(y_test)
 audit_flag_count = int(sum(
     1 for p in xgb_pipeline.predict_proba(X_test)[:, 1]
@@ -213,12 +374,15 @@ business_impact = {
     "total_test_records":  total,
 }
 
-# ── 11. Save everything to JSON ───────────────────────────────────────────────
+# ── 12. Save everything to JSON ──────────────────────────────────────────────
 output = {
-    "xgb":             xgb_metrics,
-    "decision_tree":   dt_metrics,
-    "shap_importance": shap_importance,
-    "business_impact": business_impact,
+    "xgb":              xgb_metrics,
+    "decision_tree":    dt_metrics,
+    "shap_importance":  shap_importance,
+    "business_impact":  business_impact,
+    "cv_summary":       cv_summary,
+    "scaler_benchmark": benchmark_results,
+    "optimal_threshold": round(optimal_thresh, 4),
 }
 
 with open("model_metrics.json", "w") as f:
@@ -226,7 +390,7 @@ with open("model_metrics.json", "w") as f:
 
 print("\n✅ model_metrics.json saved.")
 
-# ── 12. Save models ───────────────────────────────────────────────────────────
+# ── 13. Save models ──────────────────────────────────────────────────────────
 joblib.dump(xgb_pipeline, "xgb_model.pkl")
 joblib.dump(dt_pipeline,  "dt_model.pkl")
 print("✅ xgb_model.pkl and dt_model.pkl saved.")

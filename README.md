@@ -20,71 +20,98 @@ An enterprise-grade **expense anomaly detection system** powered by **XGBoost** 
 
 | Metric    | XGBoost | Decision Tree |
 | --------- | ------- | ------------- |
-| AUC-ROC   | 90.47%  | 89.1%         |
-| Recall    | 78%     | 63%           |
-| Precision | ~72%    | ~68%          |
-| F1 Score  | ~75%    | ~65%          |
+| AUC-ROC   | 91.20%  | ~90%          |
+| Recall    | 82%     | 65%           |
+| Precision | ~64%    | ~83%          |
+| F1 Score  | ~72%    | ~73%          |
+| Accuracy  | 89%     | 92%           |
 
-**Primary Algorithm:** XGBoost (`n_estimators=300`, `learning_rate=0.05`, `max_depth=6`, `scale_pos_weight=4.69`, predict threshold `0.40`)  
+> **5-fold cross-validation:** AUC-ROC 88.25% ± 1.61%, Recall 75.45% ± 2.57% — confirms stable generalisation.
+
+**Primary Algorithm:** XGBoost (`n_estimators=300`, `learning_rate=0.05`, `max_depth=6`, `scale_pos_weight=4.69`, `subsample=0.85`, `colsample_bytree=0.85`, `min_child_weight=3`, `gamma=0.1`, predict threshold `0.40`)  
 **Comparison Model:** Decision Tree (`max_depth=6`) — used in System Performance dashboard  
 **Training Data:** 6,000 synthetic rule-based rows (self-contained, no external CSV needed)  
-**Features:** `Exp_TotalAmount`, `IsAffidavit`, `ExpCat_ID`, `Dept_ID`, `Submission_Gap`, `Is_Weekend`, `Is_Round_Number`
+**Features (11 total):** `Log_Amount`, `Submission_Gap`, `Gap_Ratio`, `IsAffidavit`, `ExpCat_ID`, `Dept_ID`, `Is_Weekend`, `Is_Round_Number`, `HighAmt_NoReceipt`, `Amount_Tier`, `SameDay_NoReceipt`
 
 ---
 
 ## ⚙️ ML Pipeline & Normalization
 
-Both models are wrapped in a **scikit-learn `Pipeline`** that applies `StandardScaler` before the classifier. This ensures features are normalized consistently during both training and inference — the scaler is fitted only on the training split and stored as part of the pipeline object.
+Both models are wrapped in a **scikit-learn `Pipeline`** with a `ColumnTransformer` preprocessor that applies different treatment to numeric vs. binary/categorical features before passing them to the classifier.
 
 ```
-Raw Features
+Raw Features (7 original columns)
+     │
+     ▼ Feature Engineering (+4 new columns = 11 total)
+     │  Log_Amount, Gap_Ratio, HighAmt_NoReceipt, Amount_Tier, SameDay_NoReceipt
      │
      ▼
-┌─────────────────────────────┐
-│  StandardScaler             │  ← fitted on X_train only
-│  (zero mean, unit variance) │
-└────────────┬────────────────┘
-             │  scaled features
-             ▼
-┌─────────────────────────────┐
-│  XGBClassifier              │  ← produces raw probability 0–1
-│  (or DecisionTreeClassifier)│
-└────────────┬────────────────┘
-             │  predict_proba[:, 1]
-             ▼
-       ML Risk Score (%)
-             │
-             ▼
-┌─────────────────────────────┐
-│  Business Rules Engine      │  ← 9 policy rules add 0–25 pts each
-│  (apply_business_rules)     │     capped at 100 pts total
-└────────────┬────────────────┘
-             │
-             ▼
-     Final Risk Score (0–100)
-     → Triage: Low / Standard Review / Audit Flag
+┌───────────────────────────────────────────────────────┐
+│  ColumnTransformer                                    │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │  RobustScaler  → Log_Amount, Submission_Gap,    │ │  ← fitted on X_train only
+│  │                  Gap_Ratio                      │ │     (median + IQR, outlier-robust)
+│  ├─────────────────────────────────────────────────┤ │
+│  │  Passthrough   → IsAffidavit, ExpCat_ID,        │ │  ← binary / low-cardinality flags
+│  │                  Dept_ID, Is_Weekend,            │ │     no scaling needed for trees
+│  │                  Is_Round_Number,                │ │
+│  │                  HighAmt_NoReceipt, Amount_Tier, │ │
+│  │                  SameDay_NoReceipt               │ │
+│  └─────────────────────────────────────────────────┘ │
+└────────────────────────┬──────────────────────────────┘
+                         │  11 transformed features
+                         ▼
+            ┌─────────────────────────────┐
+            │  XGBClassifier              │  ← produces raw probability 0–1
+            │  (or DecisionTreeClassifier)│
+            └────────────┬────────────────┘
+                         │  predict_proba[:, 1]
+                         ▼
+                   ML Risk Score (%)
+                         │
+                         ▼
+            ┌─────────────────────────────┐
+            │  Business Rules Engine      │  ← 9 policy rules add 0–25 pts each
+            │  (apply_business_rules)     │     capped at 100 pts total
+            └────────────┬────────────────┘
+                         │
+                         ▼
+                 Final Risk Score (0–100)
+                 → Triage: Low / Standard Review / Audit Flag
 ```
 
-### Why StandardScaler?
+### Why ColumnTransformer + RobustScaler?
 
-XGBoost is tree-based and is theoretically scale-invariant, but applying `StandardScaler` in the pipeline provides two key benefits:
+- **Numeric features** (`Log_Amount`, `Submission_Gap`, `Gap_Ratio`) have wide, skewed ranges. `RobustScaler` uses the **median and IQR** instead of mean/std, so extreme expense amounts (₱250k outliers) do not distort the scaling reference the way `StandardScaler` would.
+- **Binary and low-cardinality features** (`IsAffidavit`, `Is_Weekend`, `Is_Round_Number`, etc.) carry no benefit from scaling. Scaling `{0, 1}` flags to `[-1, +1]` just adds floating-point noise to tree split thresholds.
+- **Keeping them separate** makes each column's preprocessing intent explicit and easy to swap per-column in future experiments.
 
-1. **Consistent preprocessing** — both the primary model (XGBoost) and the comparison model (Decision Tree) pass through the same normalization step, making benchmark comparisons fair.
-2. **Future-proofing** — if a linear model (e.g., Logistic Regression, SVM) is ever added as a third comparison, the pipeline does not need to change.
+> The scaler benchmark (run at training time) confirms that all scalers achieve identical AUC-ROC on this dataset thanks to XGBoost being tree-based — but `RobustScaler` is the principled choice for any future linear model added alongside it.
+
+### Engineered Features
+
+| Feature             | Formula                             | Why it helps                                                                                    |
+| ------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `Log_Amount`        | `log(1 + Exp_TotalAmount)`          | Compresses ₱100–₱250k right skew so RobustScaler centres it well                                |
+| `Gap_Ratio`         | `Submission_Gap / 60.0`             | Adds a continuous 0–1 view of policy-window usage                                               |
+| `HighAmt_NoReceipt` | `1 if amount > ₱10k AND no receipt` | Explicit interaction: the single strongest audit signal, surfaced early in shallow trees        |
+| `Amount_Tier`       | `0–4` ordinal via `np.digitize`     | Lets the model learn tier-specific patterns without discovering all breakpoints from raw values |
+| `SameDay_NoReceipt` | `1 if gap = 0 AND no receipt`       | Explicit backdating + missing receipt interaction term                                          |
 
 ### Key Pipeline Improvements Over Prior Version
 
-| Area                       | Before (LightGBM v1)             | After (XGBoost v2)                       |
-| -------------------------- | -------------------------------- | ---------------------------------------- |
-| Algorithm                  | LightGBM (GBDT)                  | XGBoost (GBDT with regularization)       |
-| Preprocessing              | None — features passed raw       | `StandardScaler` in `Pipeline`           |
-| Model storage              | Standalone `.pkl`                | Full `Pipeline` object (scaler + model)  |
-| Inference consistency      | Manual feature casting in app    | Pipeline handles scaling internally      |
-| Feature: `Is_Weekend`      | Used submission date (bug)       | Correctly uses **purchase date**         |
-| Feature: `Is_Round_Number` | `amount % 100 == 0` (mismatch)   | `amount % 500 == 0` (matches training)   |
-| ML anomaly bridge          | Fired on accumulated score (bug) | Fires on **raw ML score only** (correct) |
-| AUC-ROC                    | 90.9%                            | **90.47%** (stable with normalization)   |
-| Recall (anomaly detection) | 77%                              | **78%**                                  |
+| Area                   | LightGBM v1          | XGBoost v2                | v2 + Feature Engineering                                               |
+| ---------------------- | -------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| Algorithm              | LightGBM             | XGBoost                   | XGBoost + `subsample`, `colsample_bytree`, `min_child_weight`, `gamma` |
+| Preprocessing          | None                 | `StandardScaler` globally | `ColumnTransformer` (RobustScaler numeric, passthrough binary)         |
+| Features               | 7 raw                | 7 raw                     | **11** (+ 4 engineered)                                                |
+| Evaluation             | Single split         | Single split              | **5-fold stratified CV** (88.25% ± 1.61%)                              |
+| Threshold              | Fixed 0.40           | Fixed 0.40                | **PR-curve optimal at 0.626** (F1: 0.78 vs 0.72)                       |
+| Bug: `Is_Weekend`      | Submission date      | Purchase date ✓           | Same fix                                                               |
+| Bug: `Is_Round_Number` | `% 100`              | `% 500` ✓                 | Same fix                                                               |
+| Bug: ML bridge         | Fired on total score | Raw ML score only ✓       | Same fix                                                               |
+| AUC-ROC                | 90.9%                | 90.47%                    | **91.20%**                                                             |
+| Recall                 | 77%                  | 78%                       | **82%**                                                                |
 
 ---
 

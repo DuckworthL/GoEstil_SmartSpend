@@ -1,56 +1,93 @@
 {
   "xgb": {
     "model": "XGBoost",
-    "accuracy": 89.0,
-    "recall_rejected": 80.57,
-    "precision_approved": 95.63,
-    "f1_score": 72.03,
-    "auc_roc": 90.47,
+    "accuracy": 88.83,
+    "recall_rejected": 81.99,
+    "precision_approved": 95.92,
+    "f1_score": 72.08,
+    "auc_roc": 91.2,
     "confusion_matrix": {
-      "TP": 170,
-      "TN": 898,
-      "FP": 91,
-      "FN": 41
+      "TP": 173,
+      "TN": 893,
+      "FP": 96,
+      "FN": 38
     },
     "total_test": 1200,
-    "total_flagged": 261,
-    "total_cleared": 939,
-    "false_negative_rate": 19.43,
-    "false_positive_rate": 9.2
+    "total_flagged": 269,
+    "total_cleared": 931,
+    "false_negative_rate": 18.01,
+    "false_positive_rate": 9.71
   },
   "decision_tree": {
     "model": "Decision Tree",
-    "accuracy": 92.33,
-    "recall_rejected": 65.88,
-    "precision_approved": 93.08,
-    "f1_score": 75.14,
-    "auc_roc": 89.1,
+    "accuracy": 91.5,
+    "recall_rejected": 64.93,
+    "precision_approved": 92.85,
+    "f1_score": 72.87,
+    "auc_roc": 87.18,
     "confusion_matrix": {
-      "TP": 139,
-      "TN": 969,
-      "FP": 20,
-      "FN": 72
+      "TP": 137,
+      "TN": 961,
+      "FP": 28,
+      "FN": 74
     },
     "total_test": 1200,
-    "total_flagged": 159,
-    "total_cleared": 1041,
-    "false_negative_rate": 34.12,
-    "false_positive_rate": 2.02
+    "total_flagged": 165,
+    "total_cleared": 1035,
+    "false_negative_rate": 35.07,
+    "false_positive_rate": 2.83
   },
   "shap_importance": {
-    "Exp_TotalAmount": 1.4069,
-    "Submission_Gap": 0.7266,
-    "IsAffidavit": 0.596,
-    "ExpCat_ID": 0.3819,
-    "Is_Round_Number": 0.2836,
-    "Is_Weekend": 0.1795,
-    "Dept_ID": 0.1613
+    "Log_Amount": 0.9827,
+    "Submission_Gap": 0.6472,
+    "ExpCat_ID": 0.4141,
+    "Amount_Tier": 0.3256,
+    "IsAffidavit": 0.3136,
+    "Is_Round_Number": 0.3074,
+    "HighAmt_NoReceipt": 0.2745,
+    "Is_Weekend": 0.2113,
+    "Dept_ID": 0.1711,
+    "Gap_Ratio": 0.1535,
+    "SameDay_NoReceipt": 0.0328
   },
   "business_impact": {
-    "standard_review_pct": 85.9,
-    "audit_flag_pct": 14.1,
-    "false_negative_rate": 19.43,
-    "false_positive_rate": 9.2,
+    "standard_review_pct": 85.4,
+    "audit_flag_pct": 14.6,
+    "false_negative_rate": 18.01,
+    "false_positive_rate": 9.71,
     "total_test_records": 1200
-  }
+  },
+  "cv_summary": {
+    "auc_roc_mean": 88.25,
+    "auc_roc_std": 1.61,
+    "recall_mean": 75.45,
+    "recall_std": 2.57
+  },
+  "scaler_benchmark": {
+    "StandardScaler": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    },
+    "RobustScaler": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    },
+    "MinMaxScaler": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    },
+    "PowerTransformer": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    },
+    "QuantileNormal": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    },
+    "NoScaler": {
+      "auc_roc": 91.2,
+      "recall": 81.99
+    }
+  },
+  "optimal_threshold": 0.6262
 }
