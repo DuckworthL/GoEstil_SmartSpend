@@ -178,6 +178,12 @@ if "analysis" not in st.session_state:
     _default_pdate = _today - timedelta(days=_gap)
     if _default_pdate > _today:
         _default_pdate = _today - timedelta(days=1)
+    # If the calculated date falls on a weekend, roll back to the preceding Friday
+    # so preset samples don't accidentally trigger the weekend purchase rule (+20 pts)
+    if _default_pdate.weekday() == 5:   # Saturday → Friday
+        _default_pdate -= timedelta(days=1)
+    elif _default_pdate.weekday() == 6: # Sunday → Friday
+        _default_pdate -= timedelta(days=2)
     # Sync purchase-date widget key once from gap (only when not yet set or preset changed)
     if "fx_pdate" not in st.session_state or st.session_state.get("_pdate_from_gap"):
         st.session_state["fx_pdate"]       = _default_pdate
@@ -422,10 +428,11 @@ else:
         f"{raw_score:.1f}%",
         help="Raw XGBoost model probability before policy boosts",
     )
+    total_boost_pts = sum(pts for _, pts in boosts)
     m3.metric(
         "Policy Boost Total",
-        f"+{final_score - raw_score:.1f} pts",
-        help="Total points added by business rule violations",
+        f"+{total_boost_pts} pts",
+        help="Total points from all business rule violations (score capped at 100)",
     )
 
     # ── Triage banner ─────────────────────────────────────────────────────────
@@ -508,7 +515,7 @@ else:
             </div>
             <div style="font-size:0.8rem; color:#94a3b8; margin-top:6px;">
                 AI Risk Score: <b style="color:#f1f5f9;">{final_score:.1f}%</b>
-                &nbsp;·&nbsp; Policy Boosts: +{final_score - raw_score:.1f} pts
+                &nbsp;·&nbsp; Policy Boosts: +{total_boost_pts} pts
             </div>
         </div>
         """, unsafe_allow_html=True)
