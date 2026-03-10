@@ -241,7 +241,7 @@ def predict_risk(row: dict) -> tuple[float, float, list[tuple[str, int]]]:
     gap_ratio = gap / 60.0
 
     # Interaction: large amount + no receipt — strongest single audit signal.
-    high_amt_no_rcpt = float(amount > 10_000 and is_aff == 0)
+    high_amt_no_rcpt = float(amount > 10_000 and is_aff == 1)
 
     # Ordinal tier: lets the model learn tier-specific patterns instead of
     # discovering all breakpoints from the raw (or log) amount alone.
@@ -253,7 +253,7 @@ def predict_risk(row: dict) -> tuple[float, float, list[tuple[str, int]]]:
     )
 
     # Interaction: same-day submission + no receipt — backdating red flag.
-    same_day_no_rcpt = float(gap == 0 and is_aff == 0)
+    same_day_no_rcpt = float(gap == 0 and is_aff == 1)
 
     # ── Build inference DataFrame (column names must match ColumnTransformer) ─
     df = pd.DataFrame([{

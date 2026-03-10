@@ -64,6 +64,22 @@ dt_m   = m["decision_tree"]
 shap_d = m["shap_importance"]
 biz    = m["business_impact"]
 
+# ── 0. Exploratory Data Analysis ────────────────────────────────────────────────
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;
+            animation:fadeInUp 0.4s cubic-bezier(.22,1,.36,1) both;">
+  <span style="background:linear-gradient(135deg,#f59e0b,#fbbf24); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128269;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Exploratory Data Analysis (EDA)</span>
+</div>
+""", unsafe_allow_html=True)
+st.caption("Data distributions and risk factors identified during initial analysis.")
+st.image("fig1_class_distribution.png", use_container_width=True)
+st.image("fig2_outliers_scales.png", use_container_width=True)
+st.image("fig7_fraud_rates_by_category.png", use_container_width=True)
+
+st.markdown("---")
+
 # ── 1. Key Metrics (XGBoost) ──────────────────────────────────────────────────
 st.markdown("""
 <div style="display:flex; align-items:center; gap:10px; margin:8px 0 4px;
@@ -142,6 +158,9 @@ st.caption(
     "Minimising False Negatives is the primary objective."
 )
 
+st.markdown("<br>", unsafe_allow_html=True)
+st.image("fig3_confusion_matrices.png", use_container_width=True)
+
 st.markdown("---")
 
 # ── 3. Model Comparison ───────────────────────────────────────────────────────
@@ -186,6 +205,19 @@ comp_data = {
                       for d, x in zip(dt_vals, xgb_vals)],
 }
 st.dataframe(pd.DataFrame(comp_data).set_index("Metric"), use_container_width=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.image("fig4_roc_curve.png", use_container_width=True)
+st.image("fig5_metrics_comparison.png", use_container_width=True)
+
+st.markdown("""
+<div style="display:flex; align-items:center; gap:10px; margin:24px 0 4px;">
+  <span style="background:linear-gradient(135deg,#14b8a6,#0d9488); border-radius:8px;
+               padding:5px 10px; font-size:0.9rem;">&#128200;</span>
+  <span style="font-size:1.15rem; font-weight:700; color:#f1f5f9;">Cross-Validation Stability</span>
+</div>
+""", unsafe_allow_html=True)
+st.image("fig8_cross_validation.png", use_container_width=True)
 
 # ── Why XGBoost ───────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
@@ -279,6 +311,9 @@ st.caption(
     "Top features justify why the model flagged or cleared a report — "
     "useful for explaining decisions to employees and auditors."
 )
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.image("fig6_feature_importance.png", use_container_width=True)
 
 st.markdown("---")
 

@@ -48,10 +48,10 @@ is_round = (amounts % 500 == 0).astype(int)
 # Receipt: 78% have one; expensive / no-receipt = suspicious
 has_receipt = rng.random(N)
 is_affidavit = np.where(
-    amounts < 500,   (has_receipt < 0.65).astype(int),   # cheap: sometimes no receipt
-    np.where(amounts < 5_000,  (has_receipt < 0.82).astype(int),
-             np.where(amounts < 50_000, (has_receipt < 0.90).astype(int),
-                                        (has_receipt < 0.95).astype(int)))
+    amounts < 500,   (has_receipt > 0.65).astype(int),   # cheap: sometimes no receipt
+    np.where(amounts < 5_000,  (has_receipt > 0.82).astype(int),
+             np.where(amounts < 50_000, (has_receipt > 0.90).astype(int),
+                                        (has_receipt > 0.95).astype(int)))
 )
 
 # Submission gap: 0 = same-day, 1-5 = quick, 6-30 = normal, 31-60 = late
@@ -79,7 +79,7 @@ risk += np.where((amounts >= 10_000) & (amounts < 50_000), 0.8, 0)
 
 # No receipt is a strong risk signal (especially at higher amounts)
 no_receipt_weight = np.where(amounts >= 10_000, 2.5, np.where(amounts >= 1_000, 1.5, 0.8))
-risk += np.where(is_affidavit == 0, no_receipt_weight, 0)
+risk += np.where(is_affidavit == 1, no_receipt_weight, 0)
 
 # Same-day submission (may indicate backdating)
 risk += np.where(gaps == 0, 2.0, 0)
@@ -125,7 +125,7 @@ df["Log_Amount"] = np.log1p(df["Exp_TotalAmount"])
 # Interaction: large amount AND no receipt — the single strongest audit signal.
 # A tree split on the raw features can find this, but giving it explicitly
 # lets shallower trees (max_depth=6) surface it in the first levels.
-df["HighAmt_NoReceipt"] = ((df["Exp_TotalAmount"] > 10_000) & (df["IsAffidavit"] == 0)).astype(int)
+df["HighAmt_NoReceipt"] = ((df["Exp_TotalAmount"] > 10_000) & (df["IsAffidavit"] == 1)).astype(int)
 
 # Ordinal amount tier — lets the model learn tier-specific patterns without
 # having to discover all the breakpoints itself from raw amounts.
@@ -135,11 +135,14 @@ df["Amount_Tier"] = np.digitize(
 ).astype(int)  # 0=<1k, 1=1k-5k, 2=5k-50k, 3=50k-100k, 4=100k+
 
 # Interaction: same-day submission AND no receipt — strongest backdating signal.
-df["SameDay_NoReceipt"] = ((df["Submission_Gap"] == 0) & (df["IsAffidavit"] == 0)).astype(int)
+df["SameDay_NoReceipt"] = ((df["Submission_Gap"] == 0) & (df["IsAffidavit"] == 1)).astype(int)
 
 # Gap ratio: submission gap normalised to the 60-day policy window.
 # Provides a linear view of urgency/lateness alongside raw gap days.
 df["Gap_Ratio"] = df["Submission_Gap"] / 60.0
+
+df.to_csv("smartspend_synthetic_data.csv", index=False)
+print("✅ synthetic subset exported to smartspend_synthetic_data.csv")
 
 # ── 4. Features / target ──────────────────────────────────────────────────────
 # Numeric features — these have wide or skewed ranges and benefit from
